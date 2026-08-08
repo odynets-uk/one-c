@@ -52,6 +52,10 @@ public sealed class CliApp
                 await ListEnumsAsync(cancellationToken);
                 break;
 
+            case "show-catalog":
+                await ShowCatalogAsync(args, cancellationToken);
+                break;
+
             case "help":
             case "--help":
             case "-h":
@@ -136,6 +140,52 @@ public sealed class CliApp
         }
     }
 
+    private async Task ShowCatalogAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length < 2)
+        {
+            Console.WriteLine("Usage: OneC.Cli show-catalog <catalog-name>");
+            return;
+        }
+
+        try
+        {
+            var metadata = await _metadataService.GetMetadataAsync(cancellationToken);
+            var catalog = metadata.FindCatalog(args[1]);
+
+            if (catalog is null)
+            {
+                Console.WriteLine($"Catalog '{args[1]}' not found.");
+                return;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"=== Catalog: {catalog.Name} ({catalog.Fields.Count} fields) ===");
+            Console.WriteLine($"  XSD Type: {catalog.XsdTypeName}");
+            Console.WriteLine($"  Ref Type: {catalog.RefTypeName}");
+            Console.WriteLine($"  Hierarchical: {catalog.IsHierarchical}");
+            Console.WriteLine();
+            Console.WriteLine($"  {"#",-4} {"Field",-45} {"Type",-15} {"XSD Type",-55} {"Req",-4}");
+            Console.WriteLine($"  {new string('-', 4),-4} {new string('-', 45),-45} {new string('-', 15),-15} {new string('-', 55),-55} {new string('-', 4),-4}");
+
+            var index = 1;
+            foreach (var field in catalog.Fields)
+            {
+                Console.WriteLine(
+                    $"  {index,-4} {field.Name,-45} {field.Type,-15} {field.XsdType,-55} {(field.IsOptional ? "no" : "yes"),-4}");
+                index++;
+            }
+
+            Console.WriteLine("===========================");
+            Console.WriteLine();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to show catalog: {ErrorMessage}", ex.Message);
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
@@ -148,12 +198,14 @@ public sealed class CliApp
                              test-connection    Test 1C COM connection
                              list-catalogs      List catalogs from XSD schema
                              list-enums         List enums from XSD schema
+                             show-catalog <name> Show catalog fields with types
                              help               Show this help
 
                            Examples:
                              OneC.Cli test-connection
                              OneC.Cli list-catalogs
                              OneC.Cli list-enums
+                             OneC.Cli show-catalog Номенклатура
                            """);
     }
 }
