@@ -6,3 +6,5 @@ riderModule.iml
 /_ReSharper.Caches/
 data-enterprise.xsd
 how-to.cli.md
+OneC.Cli/appsettings.local.json
+metadata-cache.json
