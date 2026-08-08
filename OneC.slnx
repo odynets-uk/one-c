@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="OneC.Api/OneC.Api.csproj" />
+  <Project Path="OneC.Application/OneC.Application.csproj" />
+  <Project Path="OneC.Cli/OneC.Cli.csproj" />
+  <Project Path="OneC.Domain/OneC.Domain.csproj" />
+  <Project Path="OneC.Infrastructure/OneC.Infrastructure.csproj" />
+</Solution>

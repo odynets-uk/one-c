@@ -1,0 +1,95 @@
+# =============================================================
+# OneCConnector Git attributes
+# =============================================================
+
+# Keep source and documentation diffs stable across Windows and POSIX shells.
+* text=auto eol=lf
+
+# -------------------------------------------------------------
+# .NET source and project files
+# -------------------------------------------------------------
+*.cs             text diff=csharp
+*.csx            text diff=csharp
+*.csproj         text diff=xml
+*.props          text diff=xml
+*.targets        text diff=xml
+*.sln            text
+*.slnx           text diff=xml
+*.editorconfig   text
+
+# -------------------------------------------------------------
+# 1C schemas and XML
+# -------------------------------------------------------------
+*.xml            text diff=xml
+*.xsd            text diff=xml
+*.xsl            text diff=xml
+*.xslt           text diff=xml
+
+# -------------------------------------------------------------
+# Configuration and exported data
+# -------------------------------------------------------------
+*.json           text diff=json
+*.jsonc          text diff=json
+*.yaml           text diff=yaml
+*.yml            text diff=yaml
+*.csv            text
+*.ini            text
+*.cfg            text
+*.conf           text
+*.txt            text
+
+# -------------------------------------------------------------
+# Shells, Make and documentation
+# -------------------------------------------------------------
+Makefile         text eol=lf
+*.mk             text eol=lf
+*.sh             text eol=lf
+*.bash           text eol=lf
+*.ps1            text eol=lf
+*.psm1           text eol=lf
+*.bat            text eol=crlf
+*.cmd            text eol=crlf
+*.md             text diff=markdown
+*.mdx            text diff=markdown
+
+# -------------------------------------------------------------
+# Build output and generated local state
+# -------------------------------------------------------------
+bin/**           linguist-generated=true -diff
+obj/**           linguist-generated=true -diff
+schema/generated/** linguist-generated=true
+dump/**          linguist-generated=true
+*.generated.*    linguist-generated=true -diff
+
+# -------------------------------------------------------------
+# Binary files
+# -------------------------------------------------------------
+*.dll            binary
+*.exe            binary
+*.pdb            binary
+*.zip            binary
+*.7z             binary
+*.gz             binary
+*.pdf            binary
+*.png            binary
+*.jpg            binary
+*.jpeg           binary
+*.gif            binary
+*.ico            binary
+*.bmp            binary
+*.webp           binary
+*.mp3            binary
+*.mp4            binary
+*.wav            binary
+*.avi            binary
+*.mov            binary
+*.db             binary
+*.sqlite         binary
+*.sqlite3        binary
+
+# Do not include local secrets and IDE state in git archives.
+.env*            export-ignore
+.idea/**         export-ignore
+*.user           export-ignore
+*.suo            export-ignore
+.gitattributes   export-ignore

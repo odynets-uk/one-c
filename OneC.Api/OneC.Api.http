@@ -1,0 +1,6 @@
+@OneC.Api_HostAddress = http://localhost:5224
+
+GET http://localhost:5224/weatherforecast/
+Accept: application/json
+
+###
