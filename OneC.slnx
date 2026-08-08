@@ -4,4 +4,5 @@
   <Project Path="OneC.Cli/OneC.Cli.csproj" />
   <Project Path="OneC.Domain/OneC.Domain.csproj" />
   <Project Path="OneC.Infrastructure/OneC.Infrastructure.csproj" />
+  <Project Path="OneC.Tests/OneC.Tests.csproj" />
 </Solution>

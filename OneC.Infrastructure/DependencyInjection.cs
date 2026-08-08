@@ -1,4 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using OneC.Application.Abstractions.Services;
+using OneC.Infrastructure.Com;
+using OneC.Infrastructure.Services;
 
 namespace OneC.Infrastructure;
 
@@ -14,7 +17,10 @@ public static class DependencyInjection
     /// <returns>Updated service collection.</returns>
     public static IServiceCollection AddInfrastructureDi(this IServiceCollection services)
     {
-        // Register repositories, database, external clients here.
+        services.AddSingleton<ComRegistrationService>();
+        services.AddScoped<ITestConnectionService, TestConnectionService>();
+        services.AddScoped<IMetadataService, MetadataService>();
+
         return services;
     }
 }
