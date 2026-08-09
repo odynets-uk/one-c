@@ -163,10 +163,10 @@ public sealed class CatalogReader
                 : "1 = 0"; // empty array → no rows
         }
 
-        // Description → partial match (LIKE '%...%')
+        // Description → partial match (1C query language uses double quotes: LIKE "%...%")
         if (field.Equals("Description", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{alias}.{field} LIKE '%{value}%'";
+            return $"{alias}.{field} LIKE \"%{value}%\"";
         }
 
         return $"{alias}.{field} = {FormatFilterValue(value)}";
@@ -180,10 +180,10 @@ public sealed class CatalogReader
             System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.True } => "TRUE",
             System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.False } => "FALSE",
             System.Text.Json.JsonElement json => json.ValueKind == System.Text.Json.JsonValueKind.String
-                ? $"'{json.GetString()}'"
+                ? $"\"{json.GetString()}\""
                 : json.ToString(),
             null => "NULL",
-            _ => $"'{value}'",
+            _ => $"\"{value}\"",
         };
     }
 
