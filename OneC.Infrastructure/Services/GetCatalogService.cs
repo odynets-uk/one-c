@@ -125,11 +125,20 @@ public sealed class GetCatalogService : IGetCatalogService
     private static string ExpandPlaceholders(string path, string mode, int batchSize)
     {
         var now = DateTime.Now;
+        var date = now.ToString("yyyy-MM-dd");
+        var timestamp = now.ToString("yyyyMMdd-HHmmss");
+        var batch = batchSize.ToString();
+
+        // Support both {placeholder} and <placeholder> syntax.
         return path
-            .Replace("{date}", now.ToString("yyyy-MM-dd"), StringComparison.Ordinal)
+            .Replace("{date}", date, StringComparison.Ordinal)
+            .Replace("<date>", date, StringComparison.Ordinal)
             .Replace("{mode}", mode, StringComparison.Ordinal)
-            .Replace("{batch-size}", batchSize.ToString(), StringComparison.Ordinal)
-            .Replace("{timestamp}", now.ToString("yyyyMMdd-HHmmss"), StringComparison.Ordinal);
+            .Replace("<mode>", mode, StringComparison.Ordinal)
+            .Replace("{batch-size}", batch, StringComparison.Ordinal)
+            .Replace("<batch-size>", batch, StringComparison.Ordinal)
+            .Replace("{timestamp}", timestamp, StringComparison.Ordinal)
+            .Replace("<timestamp>", timestamp, StringComparison.Ordinal);
     }
 
     private static string DecryptPassword(string connectionString)
