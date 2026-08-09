@@ -169,6 +169,8 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 - Максимум: 15 значущих цифр
 - Поля: `price`, `base_cost`, `markup_pct`, `quantity`
 
+> **Стан:** `prices`/`stock` (з `markup_pct` — розрахункове поле з ціни та закупівельної) **ще не реалізовані** — вони читаються з регістрів 1С (`ЦеныНоменклатуры`, `ТоварыНаСкладах`) у наступній під-задачі.
+
 ## 8. `sql_type` JSON / JSONB
 
 - `prices` і `stock` — масиви об'єктів, зберігаються як `JSONB` або `JSON`
@@ -180,12 +182,18 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 
 ```json
 "output": {
-  "json": { "file_path": "export/products.json", "pretty": true },
+  "json": { "file_path": "export/<profile>-<mode>-<batch-size>-<timestamp>.json", "pretty": true },
   "db": { "file_path": "export/kplus.db", "engine": "sqlite", "version": "3.37+" }
 }
 ```
 
-- `json.file_path` — вихідний JSON-файл (може містити `{date}` placeholder)
+- `json.file_path` — вихідний JSON-файл. Підтримуються плейсхолдери (і `{...}`, і `<...>`):
+  - `<profile>` — ім'я файлу профілю без розширення (напр. `products-all`)
+  - `<mode>` — режим (`full` / `incremental`)
+  - `<batch-size>` — розмір батча
+  - `<timestamp>` — `yyyyMMdd-HHmmss`
+  - `{date}` — `yyyy-MM-dd`
+- Якщо плейсхолдерів немає — файл **перезаписується** за замовчуванням.
 - `json.pretty` — pretty-print
 - `db` — для регулярної синхронізації в SQLite (використовується командою `sync`)
 
@@ -208,8 +216,12 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 | Файл | Сутність | Особливості |
 |---|---|---|
 | `profiles/categories.json` | Категорії (папки Номенклатури) | `IsFolder: true`, `vo: "OneCRef"` для id/parent_id |
-| `profiles/products.json` | Товари | `IsFolder: false`, `exists: "categories.id"`, фільтри prices/stock, `empty_to_null` |
+| `profiles/products.json` | Товари (вибірка за кодами) | `IsFolder: false`, `exists: "categories.id"`, `Code IN (...)`, `empty_to_null` |
+| `profiles/products-all.json` | Всі товари (повний витяг) | `IsFolder: false` без фільтру кодів |
+
+> Локальні профілі користувача (напр. `products.local.json`) — у `.gitignore`, не комітяться.
 
 ## 13. Open decisions / TODO
 
-- Профілювання розміру батча (100/500/1000) — вимірювання часу/пам'яті
+- **Ціни/залишки** (`prices`/`stock`) через регістри 1С (`ЦеныНоменклатуры`, `ТоварыНаСкладах`) — JOIN, фільтри, `skip_items_without_*`
+- **Профілювання батча**: вже реалізовано (час/CPU/RAM — секція 10); за потреби — окремі прогони з різними `--batch-size`

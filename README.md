@@ -22,7 +22,7 @@ OneC.Domain/          Сутності, value objects, metadata, profiles
 OneC.Infrastructure/  COM, XSD-парсер, SQLite, репозиторії, Serilog
 OneC.Api/             Presentation/API: controllers, Program.cs
 .agents/tasks/        Задачі: index.md, gantt.md, task-{NNN}-{slug}.md
-.agents/templates/    Шаблони: task-template.md, entity-design-template.md
+.agents/templates/    Шаблони: task-template.md, entity-design-template.md, profile-design.md
 OneC.slnx             Solution
 ```
 
@@ -82,7 +82,7 @@ dotnet run --project OneC.Cli -- test-connection
 | `list-catalogs` | Список довідників з XSD-схеми |
 | `list-enums` | Переліки та їх значення з XSD-схеми |
 | `list-profiles` | Список доступних профілів вибірки |
-| `get-catalog <name> --fields a,b,c --limit N` | Вичитування даних довідника (JSON) |
+| `get-catalog <name> --profile <file> [--mode full\|incremental] [--batch-size N]` | Вичитування даних згідно з профілем (JSON) |
 | `sync --profile <profile> [--mode full\|incremental] [--since 1d\|24h\|1w]` | Синхронізація даних у SQLite |
 
 ## База даних

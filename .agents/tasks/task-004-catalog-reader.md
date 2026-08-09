@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **ID** | `task-004-catalog-reader` |
-| **Статус** | `in-progress` |
+| **Статус** | `done` |
 | **Залежності** | `task-003-profiles` |
 | **Оцінка** | 4d |
 | **Пріоритет** | high |
@@ -61,7 +61,7 @@
   "table": "categories",
   "columns": [
     { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY",
-      "validation": { "required": true, "regex": "^[a-f0-9-]{36}$", "case": "insensitive" } },
+      "validation": { "vo": "OneCRef" } },
     { "source": "DeletionMark", "name": "is_active", "sql_type": "INTEGER NOT NULL DEFAULT 1",
       "transform": "NOT {value}", "validation": { "boolean": "strict" } }
   ],
@@ -134,3 +134,4 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 | 2026-08-09 | Рефакторинг GUID-логіки у Value Object OneCRef (OneC.Domain/ValueObjects): парсинг, нормалізація порожнього посилання, валідація (InvalidOperationException). CatalogReader.GetRefId використовує OneCRef. Додано OneCRefTests + entity-design-onecref.md (41 тест проходять) | in-progress |
 | 2026-08-09 | Розширено формат профілю для products: validation.vo (OneCRef), validation.exists (runtime), validation.empty_to_null; filters.price_types/warehouses/changed_since (відносний/абсолютний); skip_items_without_prices/stock. CatalogReader: field_filters IN/LIKE, exists-перевірка. GetCatalogService: профілювання час/CPU/RAM. Створено profiles/products.json, уніфіковано categories.json. 57 тестів проходять | in-progress |
 | 2026-08-09 | Виправлено exists-валідацію: LoadCategoryGuids витягує всі GUID категорій (IsFolder=true) з 1С перед витягом товарів; MapRecord не додає id товарів у множину категорій | in-progress |
+| 2026-08-09 | Завершено: всі критерії готовності виконані, 57 тестів проходять, статус оновлено на done | done |
