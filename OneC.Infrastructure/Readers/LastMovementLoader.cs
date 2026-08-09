@@ -15,7 +15,9 @@ public sealed class LastMovementLoader
     private readonly ILogger _logger;
 
     // Batch size for the 1C array of references (В (&ItemsArray)).
-    private const int RefBatchSize = 50000;
+    // Smaller batches = faster per-query execution in 1C. 2000 refs per batch
+    // keeps GROUP BY queries responsive without overloading the server.
+    private const int RefBatchSize = 2000;
 
     public LastMovementLoader(IComSession session, ReferenceResolver referenceResolver, ILogger logger)
     {

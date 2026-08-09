@@ -15,9 +15,9 @@ public sealed class PriceLoader
     private readonly ILogger _logger;
 
     // Batch size for the 1C array of references (В (&ItemsArray)).
-    // Larger batches = fewer register passes. 50_000 covers the full catalog
-    // in a single pass, avoiding repeated scans of the price register.
-    private const int RefBatchSize = 50000;
+    // Smaller batches = faster per-query execution in 1C. Larger arrays (13k+ refs)
+    // made 1C very slow (~250s). 2000 refs per batch keeps each query fast.
+    private const int RefBatchSize = 2000;
 
     public PriceLoader(IComSession session, ReferenceResolver referenceResolver, ILogger logger)
     {
@@ -28,10 +28,10 @@ public sealed class PriceLoader
 
     /// <summary>
     ///     Loads the latest price slice (СрезПоследних) for the given items.
-    ///     Loads the ENTIRE latest price slice (without a В-filter) for performance.
-    ///     The В (&ItemsArray) filter with 13k+ refs is what made 1C take ~250s.
-    ///     Without the filter this is ONE fast query (like stock ~4s); matching to
-    ///     the requested items happens in .NET via GUID.
+    ///     Filters by a 1C array of references (В (&ItemsArray)) — only loads prices
+    ///     for the requested items instead of the entire price register.
+    ///     Batching avoids passing the full catalog in a single array (13k+ refs
+    ///     made 1C take ~250s per pass).
     /// </summary>
     public Dictionary<string, Dictionary<string, PriceRow>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
@@ -40,24 +40,46 @@ public sealed class PriceLoader
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, Dictionary<string, PriceRow>>(StringComparer.OrdinalIgnoreCase);
 
-        dynamic query = _session.Connection.NewObject("Query");
-        query.Text = """
-                     SELECT
-                         Цены.Номенклатура AS Item,
-                         Цены.ТипЦен AS PriceType,
-                         Цены.Цена AS Price,
-                         Цены.ПроцентСкидкиНаценки AS MarkupPct,
-                         Цены.ЕдиницаИзмерения AS Unit,
-                         Цены.Период AS Period
-                     FROM
-                         РегистрСведений.ЦеныНоменклатуры.СрезПоследних() AS Цены
-                     """;
+        foreach (var batch in itemGuids.Chunk(RefBatchSize))
+        {
+            dynamic query = _session.Connection.NewObject("Query");
+            query.Text = """
+                         SELECT
+                             Цены.Номенклатура AS Item,
+                             Цены.ТипЦен AS PriceType,
+                             Цены.Цена AS Price,
+                             Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                             Цены.ЕдиницаИзмерения AS Unit,
+                             Цены.Период AS Period
+                         FROM
+                             РегистрСведений.ЦеныНоменклатуры.СрезПоследних() AS Цены
+                         WHERE
+                             Цены.Номенклатура В (&ItemsArray)
+                         """;
 
-        dynamic table = query.Execute().Unload();
-        ProcessPriceTable(table, refCache, result);
+            query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+
+            dynamic table = query.Execute().Unload();
+            ProcessPriceTable(table, refCache, result);
+        }
 
         _logger.LogInformation("Loaded prices for {Count} items in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
         return result;
+    }
+
+    /// <summary>
+    ///     Creates a 1C Массив of catalog references for the given GUID batch,
+    ///     reusing the already-built reference cache.
+    /// </summary>
+    private dynamic CreateRefArray(IEnumerable<string> guids, RefCache refCache)
+    {
+        dynamic v8Array = _session.Connection.NewObject("Массив");
+        foreach (var guid in guids)
+        {
+            v8Array.Add(refCache.ByGuid[guid]);
+        }
+
+        return v8Array;
     }
 
     /// <summary>
