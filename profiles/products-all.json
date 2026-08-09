@@ -4,7 +4,7 @@
   "mode": "full",
   "batch_size": -1,
   "filters": {
-    "field_filters": { "IsFolder": false, "Code": ["000002841", "000000384", "000010648", "000008245", "000003186", "000001526", "000012748", "000015613"] }
+    "field_filters": { "IsFolder": false }
   },
   "skip_items_without_prices": false,
   "skip_items_without_stock": false,

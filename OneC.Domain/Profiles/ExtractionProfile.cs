@@ -12,6 +12,12 @@ public sealed record ExtractionProfile
     public string? Name { get; init; }
 
     /// <summary>
+    ///     Gets the profile file name (without extension) from which the profile was loaded,
+    ///     e.g. "products-all" for "profiles/products-all.json". Used as a placeholder value.
+    /// </summary>
+    public string? ProfileFile { get; init; }
+
+    /// <summary>
     ///     Gets the source settings — where to read data from in 1C.
     /// </summary>
     public ProfileSource Source { get; init; } = new() { Type = string.Empty };

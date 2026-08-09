@@ -30,8 +30,9 @@ public static class ProfileLoader
             throw new FileNotFoundException($"Profile file not found: {profilePath}", profilePath);
         }
 
-        var json = File.ReadAllText(profilePath);
-        return Parse(json, Path.GetFileNameWithoutExtension(profilePath));
+        var fileName = Path.GetFileNameWithoutExtension(profilePath);
+        var profile = Parse(json: File.ReadAllText(profilePath), fileName);
+        return profile with { ProfileFile = fileName };
     }
 
     /// <summary>

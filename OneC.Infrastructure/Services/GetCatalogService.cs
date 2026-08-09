@@ -98,7 +98,8 @@ public sealed class GetCatalogService : IGetCatalogService
             return;
         }
 
-        filePath = ExpandPlaceholders(filePath, profile.Mode, batchSize);
+        var profilePlaceholder = profile.ProfileFile ?? profile.Name ?? "catalog";
+        filePath = ExpandPlaceholders(filePath, profilePlaceholder, profile.Mode, batchSize);
 
         var directory = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(directory))
@@ -122,7 +123,7 @@ public sealed class GetCatalogService : IGetCatalogService
         _logger.LogInformation("Written {Count} records to {FilePath}.", records.Count, filePath);
     }
 
-    private static string ExpandPlaceholders(string path, string mode, int batchSize)
+    private static string ExpandPlaceholders(string path, string profileName, string mode, int batchSize)
     {
         var now = DateTime.Now;
         var date = now.ToString("yyyy-MM-dd");
@@ -138,7 +139,9 @@ public sealed class GetCatalogService : IGetCatalogService
             .Replace("{batch-size}", batch, StringComparison.Ordinal)
             .Replace("<batch-size>", batch, StringComparison.Ordinal)
             .Replace("{timestamp}", timestamp, StringComparison.Ordinal)
-            .Replace("<timestamp>", timestamp, StringComparison.Ordinal);
+            .Replace("<timestamp>", timestamp, StringComparison.Ordinal)
+            .Replace("{profile}", profileName, StringComparison.Ordinal)
+            .Replace("<profile>", profileName, StringComparison.Ordinal);
     }
 
     private static string DecryptPassword(string connectionString)
