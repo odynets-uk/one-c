@@ -169,7 +169,7 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 - Максимум: 15 значущих цифр
 - Поля: `price`, `base_cost`, `markup_pct`, `quantity`
 
-> **Стан:** `prices`/`stock` (з `markup_pct` — розрахункове поле з ціни та закупівельної) **ще не реалізовані** — вони читаються з регістрів 1С (`ЦеныНоменклатуры`, `ТоварыНаСкладах`) у наступній під-задачі.
+> **Стан:** `prices`/`stock` реалізовані — читаються з регістрів 1С (`ЦеныНоменклатуры`, `ТоварыНаСкладах`) через `PriceLoader`, `StockLoader`, `LastMovementLoader` (в `OneC.Infrastructure/Readers`). Розрахунок цін (markup) — в `PriceCalculator` (в `OneC.Domain/Register`).
 
 ## 8. `sql_type` JSON / JSONB
 
@@ -223,5 +223,5 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 
 ## 13. Open decisions / TODO
 
-- **Ціни/залишки** (`prices`/`stock`) через регістри 1С (`ЦеныНоменклатуры`, `ТоварыНаСкладах`) — JOIN, фільтри, `skip_items_without_*`
 - **Профілювання батча**: вже реалізовано (час/CPU/RAM — секція 10); за потреби — окремі прогони з різними `--batch-size`
+- **Продуктивність повного витягу**: `LoadPrices` фільтрується `В (&ItemsArray)` з batching (2000 refs/batch); потрібен повторний замір на `products-all.json`

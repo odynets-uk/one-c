@@ -4,7 +4,7 @@
 |---|---|
 | **ID** | `task-005-sync-sqlite` |
 | **Статус** | `backlog` |
-| **Залежності** | `task-004-catalog-reader` |
+| **Залежності** | `task-004a-performance` |
 | **Оцінка** | 5d |
 | **Пріоритет** | high |
 

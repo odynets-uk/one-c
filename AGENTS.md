@@ -2,7 +2,7 @@
 
 Цей файл є авторитетним джерелом архітектурних, DI, persistence, testing і change-management правил. Опис продукту, endpoint-ів і quick start знаходиться в [`README.md`](README.md); не дублюй його тут.
 
-Перед реалізацією нової або перебудовою наявної сутності використовуй [`AGENTS/ENTITY-DESIGN-TEMPLATE.md`](.agents/templates/entity-design-template.md). Заповнений шаблон є вхідним контрактом для Domain, Application, Infrastructure, Presentation і тестів.
+Перед реалізацією нової або перебудовою наявної сутності використовуй [`entity-design-template.md`](.agents/templates/entity-design-template.md). Заповнений шаблон є вхідним контрактом для Domain, Application, Infrastructure, Presentation і тестів.
 
 ## Архітектура
 
@@ -21,9 +21,9 @@ OneC.Api (Presentation/API)
               └── OneC.Domain
 ```
 
-- `OneC.Domain` не має project references; містить сутності, value objects, aggregates, domain events та exceptions, коли вони реалізовані.
-- `OneC.Application` містить use cases, DTOs і ports/interfaces.
-- `OneC.Infrastructure` містить COM-з'єднання, XSD-парсер, SQLite, репозиторії та інші adapters і реалізує application ports.
+- `OneC.Domain` не має project references; містить сутності, value objects, aggregates, domain events, exceptions та DTOs (напр. `OneC.Domain/Register/`), коли вони реалізовані.
+- `OneC.Application` містить use cases, DTOs і ports/interfaces (напр. `IRegisterDataReader` в `OneC.Application/Abstractions`).
+- `OneC.Infrastructure` містить COM-з'єднання, XSD-парсер, SQLite, репозиторії, readers (напр. `PriceLoader`, `StockLoader`, `ReferenceResolver`) та інші adapters і реалізує application ports.
 - `OneC.Cli` містить команди CLI та `Program.cs`; він є єдиним місцем виклику Infrastructure DI.
 - `OneC.Api` містить controllers та `Program.cs`; він є єдиним місцем виклику Infrastructure DI для API.
 - Залежності спрямовані всередину: Presentation → Application/Infrastructure, Infrastructure → Application, Application → Domain.

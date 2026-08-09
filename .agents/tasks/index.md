@@ -8,7 +8,7 @@
 | `task-003-profiles` | Абстракція профілів вибірки | `done` | `task-002-xsd-parser` | 2d |
 | `task-004-catalog-reader` | Динамічний читач даних | `done` | `task-003-profiles` | 4d |
 | `task-004a-performance` | Оптимізація COM-витягу цін/залишків | `in-progress` | `task-004-catalog-reader` | 2d |
-| `task-005-sync-sqlite` | Синхронізатор та SQLite | `backlog` | `task-004-catalog-reader` | 5d |
+| `task-005-sync-sqlite` | Синхронізатор та SQLite | `backlog` | `task-004a-performance` | 5d |
 | `task-006-api` | API для читання даних | `backlog` | `task-005-sync-sqlite` | 3d |
 
 ## Статуси

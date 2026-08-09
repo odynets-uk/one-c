@@ -18,8 +18,8 @@ OneC — CLI-синхронізатор даних з 1С (через COM) у SQ
 ```text
 OneC.Cli/             Presentation/CLI: команди, Program.cs, appsettings
 OneC.Application/     Use cases, DTOs, ports/interfaces
-OneC.Domain/          Сутності, value objects, metadata, profiles
-OneC.Infrastructure/  COM, XSD-парсер, SQLite, репозиторії, Serilog
+OneC.Domain/          Сутності, value objects, metadata, profiles, register DTOs
+OneC.Infrastructure/  COM, XSD-парсер, SQLite, репозиторії, readers, Serilog
 OneC.Api/             Presentation/API: controllers, Program.cs
 .agents/tasks/        Задачі: index.md, gantt.md, task-{NNN}-{slug}.md
 .agents/templates/    Шаблони: task-template.md, entity-design-template.md, profile-design.md
