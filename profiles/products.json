@@ -4,17 +4,7 @@
   "mode": "full",
   "batch_size": -1,
   "filters": {
-    "field_filters": { "IsFolder": false, "Code": ["000002841", "000000384", "000010648", "000008245", "000003186", "000001526", "000012748", "000015613"] },
-    "prices": {
-      "price_types": ["Цена продажи", "Цена закупочная"],
-      "exclude_zero_price": true,
-      "changed_since": "45d"
-    },
-    "stock": {
-      "warehouses": ["*"],
-      "only_positive": false,
-      "changed_since": "45d"
-    },
+    "field_filters": { "IsFolder": false, "Code": ["000002841", "000000384", "000010648", "000008245", "000003186", "000001526", "000012748", "000015613"] }
   },
   "skip_items_without_prices": false,
   "skip_items_without_stock": false,
@@ -43,11 +33,7 @@
     { "source": "Услуга", "name": "nonmaterial", "sql_type": "INTEGER NOT NULL DEFAULT 0",
       "validation": { "boolean": "strict" } },
     { "source": "Комплект", "name": "suit", "sql_type": "INTEGER NOT NULL DEFAULT 0",
-      "validation": { "boolean": "strict" } },
-    { "source": "Prices", "name": "prices", "sql_type": "JSONB",
-      "validation": { "nullable": true, "empty_to_null": true } },
-    { "source": "Stock", "name": "stock", "sql_type": "JSONB",
-      "validation": { "nullable": true, "empty_to_null": true } }
+      "validation": { "boolean": "strict" } }
   ],
   "references": [
     { "column": "category_id", "references": "categories(id)", "on_delete": "RESTRICT", "on_update": "NO ACTION" }
