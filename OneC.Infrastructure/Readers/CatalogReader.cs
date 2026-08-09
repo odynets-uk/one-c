@@ -62,9 +62,10 @@ public sealed class CatalogReader
 
             // 4. Iterate (Latin method).
             var count = 0;
+            var idSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             while (selection.Next())
             {
-                var record = MapRecord(selection, profile, catalogName);
+                var record = MapRecord(selection, profile, catalogName, idSet);
                 records.Add(record);
                 count++;
 
@@ -129,18 +130,37 @@ public sealed class CatalogReader
     {
         var conditions = new List<string>();
 
-        // field_filters: { "IsFolder": true }
+        // field_filters: { "IsFolder": true, "Code": ["000002841", ...], "Description": "..." }
         var fieldFilters = profile.Filters?.FieldFilters;
         if (fieldFilters is not null)
         {
             foreach (var filter in fieldFilters)
             {
-                var value = FormatFilterValue(filter.Value);
-                conditions.Add($"{alias}.{filter.Key} = {value}");
+                conditions.Add(BuildFieldCondition(alias, filter.Key, filter.Value));
             }
         }
 
         return conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : string.Empty;
+    }
+
+    private static string BuildFieldCondition(string alias, string field, object? value)
+    {
+        // Array → IN (...)
+        if (value is System.Collections.IEnumerable enumerable and not string)
+        {
+            var items = enumerable.Cast<object?>().Select(FormatFilterValue).ToList();
+            return items.Count > 0
+                ? $"{alias}.{field} IN ({string.Join(", ", items)})"
+                : "1 = 0"; // empty array → no rows
+        }
+
+        // Description → partial match (LIKE '%...%')
+        if (field.Equals("Description", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{alias}.{field} LIKE '%{value}%'";
+        }
+
+        return $"{alias}.{field} = {FormatFilterValue(value)}";
     }
 
     private static string FormatFilterValue(object? value)
@@ -158,7 +178,11 @@ public sealed class CatalogReader
         };
     }
 
-    private Dictionary<string, object?> MapRecord(dynamic selection, ExtractionProfile profile, string alias)
+    private Dictionary<string, object?> MapRecord(
+        dynamic selection,
+        ExtractionProfile profile,
+        string alias,
+        HashSet<string> idSet)
     {
         var record = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
@@ -208,6 +232,23 @@ public sealed class CatalogReader
                 {
                     var mapped = _mapper.Map(rawValue, column);
                     record[column.Name] = ConvertToDbValue(mapped, column);
+
+                    // Collect the 'id' column values for 'exists' validation.
+                    if (column.Name.Equals("id", StringComparison.OrdinalIgnoreCase) && mapped is not null)
+                    {
+                        idSet.Add(mapped.ToString()!);
+                    }
+
+                    // 'exists' runtime validation: value must be null or exist in the collected id set.
+                    if (column.Validation?.Exists is not null && mapped is not null)
+                    {
+                        var existsRef = column.Validation.Exists;
+                        if (!idSet.Contains(mapped.ToString()!))
+                        {
+                            throw new InvalidOperationException(
+                                $"Column '{column.Name}': value '{mapped}' does not exist in '{existsRef}'.");
+                        }
+                    }
                 }
                 catch (InvalidOperationException ex)
                 {

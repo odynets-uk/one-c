@@ -93,4 +93,5 @@ SQLite — основне сховище. Таблиці: `items`, `prices`, `st
 
 - [`AGENTS.md`](AGENTS.md) — архітектура, залежності шарів, DI, БД, інтеграції, тестування, git-workflow і task workflow.
 - [`.agents/templates/entity-design-template.md`](.agents/templates/entity-design-template.md) — шаблон опису сутності/профілю перед реалізацією.
+- [`.agents/templates/profile-design.md`](.agents/templates/profile-design.md) — авторитетний посібник з формату профілів вибірки (поля, фільтри, валідація, команди, тестування).
 - [`.agents/tasks/`](.agents/tasks/) — індекс задач, Gantt, task-файли.

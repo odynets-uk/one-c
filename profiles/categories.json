@@ -29,9 +29,7 @@
       "name": "id",
       "sql_type": "TEXT PRIMARY KEY",
       "validation": {
-        "required": true,
-        "regex": "^[a-f0-9-]{36}$",
-        "case": "insensitive"
+        "vo": "OneCRef"
       }
     },
     {
@@ -39,8 +37,7 @@
       "name": "parent_id",
       "sql_type": "TEXT",
       "validation": {
-        "nullable": true,
-        "regex": "^[a-f0-9-]{36}$"
+        "vo": "OneCRef"
       }
     },
     {

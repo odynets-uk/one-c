@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using OneC.Domain.Profiles;
+using OneC.Domain.ValueObjects;
 using OneC.Infrastructure.Com;
 
 namespace OneC.Infrastructure.Readers;
@@ -38,17 +40,32 @@ public sealed class ComValueMapper
         // First: normalize 1C empty values (Undefined/NULL COM wrappers) to real null.
         var normalized = Normalize(rawValue);
 
+        // Then: apply the domain Value Object (e.g. OneCRef) if configured.
+        var voValue = ApplyValueObject(normalized, column);
+
         // Then: transform the raw value.
-        var transformed = ApplyTransform(normalized, column.Transform);
+        var transformed = ApplyTransform(voValue, column.Transform);
 
         // Normalize empty JSON elements (e.g. null/everything from 1C) to null.
-        if (transformed is System.Text.Json.JsonElement je)
+        if (transformed is JsonElement je)
         {
             transformed = je.ValueKind switch
             {
-                System.Text.Json.JsonValueKind.Null => null,
-                System.Text.Json.JsonValueKind.String when string.IsNullOrEmpty(je.GetString()) => null,
-                System.Text.Json.JsonValueKind.Object when je.EnumerateObject().Any() == false => null,
+                JsonValueKind.Null => null,
+                JsonValueKind.String when string.IsNullOrEmpty(je.GetString()) => null,
+                JsonValueKind.Object when je.EnumerateObject().Any() == false => null,
+                _ => transformed,
+            };
+        }
+
+        // empty_to_null: empty arrays/objects → null (scalars keep their own values).
+        if (column.Validation?.EmptyToNull == true)
+        {
+            transformed = transformed switch
+            {
+                JsonElement { ValueKind: JsonValueKind.Array } arr when arr.GetArrayLength() == 0 => null,
+                JsonElement { ValueKind: JsonValueKind.Object } obj when !obj.EnumerateObject().Any() => null,
+                System.Collections.IEnumerable { } e when !e.Cast<object?>().Any() => null,
                 _ => transformed,
             };
         }
@@ -57,6 +74,26 @@ public sealed class ComValueMapper
         Validate(transformed, column);
 
         return transformed;
+    }
+
+    /// <summary>
+    ///     Applies the configured domain Value Object (e.g. "OneCRef") to the value.
+    ///     The Value Object encapsulates parsing/normalization/validation.
+    /// </summary>
+    private object? ApplyValueObject(object? value, ProfileColumn column)
+    {
+        var vo = column.Validation?.Vo;
+        if (string.IsNullOrWhiteSpace(vo))
+        {
+            return value;
+        }
+
+        if (string.Equals(vo, "OneCRef", StringComparison.Ordinal))
+        {
+            return OneCRef.FromString(value?.ToString())?.ToString();
+        }
+
+        return value;
     }
 
     /// <summary>

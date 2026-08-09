@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
@@ -63,14 +64,25 @@ public sealed class GetCatalogService : IGetCatalogService
         var mapper = new ComValueMapper(session, Logging.CreateLogger<ComValueMapper>());
         var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>());
 
+        var stopwatch = Stopwatch.StartNew();
+        var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;
+        var memBefore = Process.GetCurrentProcess().WorkingSet64;
+
         var records = reader.Read(profile, batchSize);
 
         WriteJsonOutput(profile, records);
 
+        stopwatch.Stop();
+        var cpuAfter = Process.GetCurrentProcess().TotalProcessorTime;
+        var memAfter = Process.GetCurrentProcess().WorkingSet64;
+
         _logger.LogInformation(
-            "Catalog '{ProfileName}' extracted: {Count} records.",
+            "Catalog '{ProfileName}' extracted: {Count} records in {ElapsedMs} ms (CPU {CpuMs} ms, RAM {RamDeltaMb} MB).",
             profile.Name,
-            records.Count);
+            records.Count,
+            stopwatch.ElapsedMilliseconds,
+            (cpuAfter - cpuBefore).TotalMilliseconds,
+            (memAfter - memBefore) / (1024.0 * 1024.0));
 
         return Task.FromResult(records.Count);
     }

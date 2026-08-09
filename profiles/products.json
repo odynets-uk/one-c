@@ -1,0 +1,58 @@
+{
+  "name": "products",
+  "source": { "type": "CatalogObject.Номенклатура", "schema": "./data-enterprise.xsd" },
+  "mode": "full",
+  "batch_size": -1,
+  "filters": {
+    "field_filters": { "IsFolder": false, "Code": ["000002841", "000000384", "000010648", "000008245", "000003186", "000001526", "000012748", "000015613"] },
+    "prices": {
+      "price_types": ["Цена продажи", "Цена закупочная"],
+      "exclude_zero_price": true,
+      "changed_since": "45d"
+    },
+    "stock": {
+      "warehouses": ["*"],
+      "only_positive": false,
+      "changed_since": "45d"
+    },
+  },
+  "skip_items_without_prices": false,
+  "skip_items_without_stock": false,
+  "output": {
+    "json": { "file_path": "export/products.json", "pretty": true },
+    "db": { "file_path": "export/kplus.db", "engine": "sqlite", "version": "3.37+" }
+  },
+  "table": "products",
+  "columns": [
+    { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY",
+      "validation": { "vo": "OneCRef" } },
+    { "source": "Parent", "name": "category_id", "sql_type": "TEXT",
+      "validation": { "vo": "OneCRef", "exists": "categories.id" } },
+    { "source": "Code", "name": "legacy_id", "sql_type": "TEXT NOT NULL",
+      "validation": { "required": true, "unique": true, "regex": "^\\d{9}$" } },
+    { "source": "Description", "name": "name", "sql_type": "TEXT",
+      "validation": { "nullable": true, "min_length": 1 } },
+    { "source": "Артикул", "name": "sku", "sql_type": "TEXT",
+      "validation": { "nullable": true, "min_length": 1 } },
+    { "source": "Комментарий", "name": "comment", "sql_type": "TEXT",
+      "validation": { "nullable": true, "min_length": 1 } },
+    { "source": "DeletionMark", "name": "is_active", "sql_type": "INTEGER NOT NULL DEFAULT 1",
+      "transform": "NOT {value}", "validation": { "boolean": "strict" } },
+    { "source": "Набор", "name": "is_boxset", "sql_type": "INTEGER NOT NULL DEFAULT 0",
+      "validation": { "boolean": "strict" } },
+    { "source": "Услуга", "name": "nonmaterial", "sql_type": "INTEGER NOT NULL DEFAULT 0",
+      "validation": { "boolean": "strict" } },
+    { "source": "Комплект", "name": "suit", "sql_type": "INTEGER NOT NULL DEFAULT 0",
+      "validation": { "boolean": "strict" } },
+    { "source": "Prices", "name": "prices", "sql_type": "JSONB",
+      "validation": { "nullable": true, "empty_to_null": true } },
+    { "source": "Stock", "name": "stock", "sql_type": "JSONB",
+      "validation": { "nullable": true, "empty_to_null": true } }
+  ],
+  "references": [
+    { "column": "category_id", "references": "categories(id)", "on_delete": "RESTRICT", "on_update": "NO ACTION" }
+  ],
+  "indexes": [
+    { "name": "products_category_id_index", "columns": ["category_id"] }
+  ]
+}

@@ -141,6 +141,97 @@ public class ComValueMapperTests
         Assert.Throws<InvalidOperationException>(() => mapper.Map("not-a-bool", column));
     }
 
+    [Fact]
+    public void Map_VoOneCRef_ValidGuid_ReturnsGuid()
+    {
+        var mapper = CreateMapper();
+        var column = Column(validation: new ColumnValidation { Vo = "OneCRef" });
+        const string guid = "9d8fb587-9a93-11e6-80e0-1078d2d7c888";
+
+        var result = mapper.Map(guid, column);
+
+        Assert.Equal(guid, result);
+    }
+
+    [Fact]
+    public void Map_VoOneCRef_EmptyGuid_ReturnsNull()
+    {
+        var mapper = CreateMapper();
+        var column = Column(validation: new ColumnValidation { Vo = "OneCRef" });
+        const string emptyGuid = "00000000-0000-0000-0000-000000000000";
+
+        var result = mapper.Map(emptyGuid, column);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Map_VoOneCRef_InvalidGuid_Throws()
+    {
+        var mapper = CreateMapper();
+        var column = Column(validation: new ColumnValidation { Vo = "OneCRef" });
+
+        Assert.Throws<InvalidOperationException>(() => mapper.Map("Бухгалтерські бланки", column));
+    }
+
+    [Fact]
+    public void Map_VoOneCRef_Null_ReturnsNull()
+    {
+        var mapper = CreateMapper();
+        var column = Column(validation: new ColumnValidation { Vo = "OneCRef" });
+
+        var result = mapper.Map(null, column);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Map_EmptyToNull_EmptyArray_ReturnsNull()
+    {
+        var mapper = CreateMapper();
+        var column = Column(
+            source: "Prices",
+            name: "prices",
+            sqlType: "JSONB",
+            validation: new ColumnValidation { EmptyToNull = true });
+        var emptyArray = System.Text.Json.JsonSerializer.Deserialize<object>("[]");
+
+        var result = mapper.Map(emptyArray, column);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Map_EmptyToNull_NonEmptyArray_ReturnsValue()
+    {
+        var mapper = CreateMapper();
+        var column = Column(
+            source: "Prices",
+            name: "prices",
+            sqlType: "JSONB",
+            validation: new ColumnValidation { EmptyToNull = true });
+        var array = System.Text.Json.JsonSerializer.Deserialize<object>("[{\"price\": 82.12}]");
+
+        var result = mapper.Map(array, column);
+
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public void Map_EmptyToNull_Scalar_KeepsValue()
+    {
+        var mapper = CreateMapper();
+        var column = Column(
+            source: "Price",
+            name: "price",
+            sqlType: "JSONB",
+            validation: new ColumnValidation { EmptyToNull = true });
+
+        var result = mapper.Map(0.0, column);
+
+        Assert.Equal(0.0, result);
+    }
+
     /// <summary>
     ///     Minimal fake session for unit tests (no real COM).
     /// </summary>

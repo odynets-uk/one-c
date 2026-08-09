@@ -117,12 +117,13 @@ public sealed record ProfileFilters
 public sealed record PriceFilter
 {
     /// <summary>
-    ///     Gets the "changed since" date (null = all).
+    ///     Gets the "changed since" period (null = all).
+    ///     Relative: "14d", "2w", "6h" (s/m/h/d/w) or absolute range "2026-07-01:2026-07-31".
     /// </summary>
-    public DateTime? ChangedSince { get; init; }
+    public string? ChangedSince { get; init; }
 
     /// <summary>
-    ///     Gets the list of price types to include (empty = all).
+    ///     Gets the list of price types to include (empty or ["*"] = all).
     /// </summary>
     public IReadOnlyList<string> PriceTypes { get; init; } = [];
 
@@ -138,12 +139,13 @@ public sealed record PriceFilter
 public sealed record StockFilter
 {
     /// <summary>
-    ///     Gets the "changed since" date (null = all).
+    ///     Gets the "changed since" period (null = all).
+    ///     Relative: "14d", "2w", "6h" (s/m/h/d/w) or absolute range "2026-07-01:2026-07-31".
     /// </summary>
-    public DateTime? ChangedSince { get; init; }
+    public string? ChangedSince { get; init; }
 
     /// <summary>
-    ///     Gets the list of warehouses to include (empty = all).
+    ///     Gets the list of warehouses to include (empty or ["*"] = all).
     /// </summary>
     public IReadOnlyList<string> Warehouses { get; init; } = [];
 
@@ -260,6 +262,25 @@ public sealed record ColumnValidation
     ///     Gets the boolean validation mode ("strict" or null).
     /// </summary>
     public string? Boolean { get; init; }
+
+    /// <summary>
+    ///     Gets the name of the domain Value Object used to validate this column
+    ///     (e.g. "OneCRef" for 1C reference GUIDs). When set, the Value Object
+    ///     encapsulates parsing/normalization/validation instead of regex/required.
+    /// </summary>
+    public string? Vo { get; init; }
+
+    /// <summary>
+    ///     Gets the "exists" reference for runtime referential validation
+    ///     (e.g. "categories.id" — the value must be null or exist in that table.column).
+    /// </summary>
+    public string? Exists { get; init; }
+
+    /// <summary>
+    ///     Gets a value indicating whether empty arrays/objects should be normalized to null.
+    ///     Scalar values (int, float, string, bool) keep their own values.
+    /// </summary>
+    public bool EmptyToNull { get; init; }
 }
 
 /// <summary>

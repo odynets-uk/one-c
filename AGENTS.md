@@ -72,8 +72,9 @@ SQLite — основне сховище даних. Таблиці: `items`, `p
 ### Профілі вибірки
 
 - Абстрактні моделі профілів — в `OneC.Domain/Profiles`.
-- Конкретні профілі (`catalog`, `products`, `expenses`) — окремий таск після опису користувачем.
-- Профілі описують: які поля брати, фільтри (IsFolder), зв'язки (залишки, ціни), режим (повний дамп / інкрементальний).
+- Конкретні профілі (`profiles/categories.json`, `profiles/products.json`) — описані в [`profile-design.md`](.agents/templates/profile-design.md).
+- Профілі описують: які поля брати, фільтри (IsFolder, Code, prices, stock), зв'язки (залишки, ціни), режим (повний дамп / інкрементальний).
+- Для інформації про формат профілю дивись [`profile-design.md`](.agents/templates/profile-design.md) — авторитетний посібник.
 
 ## Логування
 

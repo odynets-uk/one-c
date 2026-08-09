@@ -163,4 +163,181 @@ public class ProfileLoaderTests
     {
         Assert.Throws<FileNotFoundException>(() => ProfileLoader.Load("nonexistent-profile.json"));
     }
+
+    [Fact]
+    public void Parse_ValidVoOneCRef_Loads()
+    {
+        const string json = """
+                            {
+                              "name": "categories",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "categories",
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY",
+                                  "validation": { "vo": "OneCRef" } }
+                              ]
+                            }
+                            """;
+
+        var profile = ProfileLoader.Parse(json, "categories");
+
+        Assert.Equal("OneCRef", profile.Columns[0].Validation!.Vo);
+    }
+
+    [Fact]
+    public void Parse_UnknownVo_Throws()
+    {
+        const string json = """
+                            {
+                              "name": "test",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "categories",
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY",
+                                  "validation": { "vo": "UnknownVo" } }
+                              ]
+                            }
+                            """;
+
+        Assert.Throws<JsonException>(() => ProfileLoader.Parse(json, "test"));
+    }
+
+    [Fact]
+    public void Parse_ValidExists_Loads()
+    {
+        const string json = """
+                            {
+                              "name": "products",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY",
+                                  "validation": { "vo": "OneCRef" } },
+                                { "source": "Parent", "name": "category_id", "sql_type": "TEXT",
+                                  "validation": { "vo": "OneCRef", "exists": "categories.id" } }
+                              ]
+                            }
+                            """;
+
+        var profile = ProfileLoader.Parse(json, "products");
+
+        Assert.Equal("categories.id", profile.Columns[1].Validation!.Exists);
+    }
+
+    [Fact]
+    public void Parse_InvalidExistsFormat_Throws()
+    {
+        const string json = """
+                            {
+                              "name": "test",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY" },
+                                { "source": "Parent", "name": "category_id", "sql_type": "TEXT",
+                                  "validation": { "exists": "categories" } }
+                              ]
+                            }
+                            """;
+
+        Assert.Throws<JsonException>(() => ProfileLoader.Parse(json, "test"));
+    }
+
+    [Fact]
+    public void Parse_ValidEmptyToNullJson_Loads()
+    {
+        const string json = """
+                            {
+                              "name": "products",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY" },
+                                { "source": "Prices", "name": "prices", "sql_type": "JSONB",
+                                  "validation": { "nullable": true, "empty_to_null": true } }
+                              ]
+                            }
+                            """;
+
+        var profile = ProfileLoader.Parse(json, "products");
+
+        Assert.True(profile.Columns[1].Validation!.EmptyToNull);
+    }
+
+    [Fact]
+    public void Parse_EmptyToNullNonJson_Throws()
+    {
+        const string json = """
+                            {
+                              "name": "test",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY" },
+                                { "source": "Name", "name": "name", "sql_type": "TEXT",
+                                  "validation": { "empty_to_null": true } }
+                              ]
+                            }
+                            """;
+
+        Assert.Throws<JsonException>(() => ProfileLoader.Parse(json, "test"));
+    }
+
+    [Fact]
+    public void Parse_ValidChangedSince_Loads()
+    {
+        const string json = """
+                            {
+                              "name": "products",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "filters": { "prices": { "changed_since": "45d" } },
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY" }
+                              ]
+                            }
+                            """;
+
+        var profile = ProfileLoader.Parse(json, "products");
+
+        Assert.Equal("45d", profile.Filters!.Prices!.ChangedSince);
+    }
+
+    [Fact]
+    public void Parse_InvalidChangedSince_Throws()
+    {
+        const string json = """
+                            {
+                              "name": "test",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "filters": { "prices": { "changed_since": "invalid" } },
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY" }
+                              ]
+                            }
+                            """;
+
+        Assert.Throws<JsonException>(() => ProfileLoader.Parse(json, "test"));
+    }
+
+    [Fact]
+    public void Parse_AbsoluteChangedSinceRange_Loads()
+    {
+        const string json = """
+                            {
+                              "name": "products",
+                              "source": { "type": "CatalogObject.Номенклатура" },
+                              "table": "products",
+                              "filters": { "stock": { "changed_since": "2026-07-01:2026-07-31" } },
+                              "columns": [
+                                { "source": "Ref", "name": "id", "sql_type": "TEXT PRIMARY KEY" }
+                              ]
+                            }
+                            """;
+
+        var profile = ProfileLoader.Parse(json, "products");
+
+        Assert.Equal("2026-07-01:2026-07-31", profile.Filters!.Stock!.ChangedSince);
+    }
 }

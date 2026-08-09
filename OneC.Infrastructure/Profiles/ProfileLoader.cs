@@ -95,12 +95,57 @@ public static class ProfileLoader
                 {
                     errors.Add($"Column '{column.Name}': 'sql_type' is required.");
                 }
+
+                var validation = column.Validation;
+                if (validation is not null)
+                {
+                    // 'vo' must be a known domain Value Object.
+                    if (!string.IsNullOrWhiteSpace(validation.Vo) &&
+                        !string.Equals(validation.Vo, "OneCRef", StringComparison.Ordinal))
+                    {
+                        errors.Add($"Column '{column.Name}': unknown 'vo' '{validation.Vo}'. Supported: 'OneCRef'.");
+                    }
+
+                    // 'exists' must be in "table.column" format.
+                    if (!string.IsNullOrWhiteSpace(validation.Exists) &&
+                        !IsTableColumn(validation.Exists))
+                    {
+                        errors.Add(
+                            $"Column '{column.Name}': 'exists' must be in 'table.column' format, got '{validation.Exists}'.");
+                    }
+
+                    // 'empty_to_null' only makes sense for JSON/JSONB columns.
+                    if (validation.EmptyToNull &&
+                        !column.SqlType.StartsWith("JSON", StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(
+                            $"Column '{column.Name}': 'empty_to_null' requires 'sql_type' JSON/JSONB, got '{column.SqlType}'.");
+                    }
+                }
             }
 
             // Ensure 'id' column (primary key) exists.
             if (profile.Columns.All(c => !c.Name.Equals("id", StringComparison.OrdinalIgnoreCase)))
             {
                 errors.Add("Profile must define an 'id' column (primary key).");
+            }
+        }
+
+        if (profile.Filters?.Prices is { } prices)
+        {
+            if (!string.IsNullOrWhiteSpace(prices.ChangedSince) && !IsValidPeriod(prices.ChangedSince))
+            {
+                errors.Add(
+                    $"Profile 'filters.prices.changed_since' must be relative (e.g. '14d', '2w', '6h') or range 'YYYY-MM-DD:YYYY-MM-DD', got '{prices.ChangedSince}'.");
+            }
+        }
+
+        if (profile.Filters?.Stock is { } stock)
+        {
+            if (!string.IsNullOrWhiteSpace(stock.ChangedSince) && !IsValidPeriod(stock.ChangedSince))
+            {
+                errors.Add(
+                    $"Profile 'filters.stock.changed_since' must be relative (e.g. '14d', '2w', '6h') or range 'YYYY-MM-DD:YYYY-MM-DD', got '{stock.ChangedSince}'.");
             }
         }
 
@@ -113,5 +158,26 @@ public static class ProfileLoader
         {
             throw new JsonException($"Profile validation failed:{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", errors)}");
         }
+    }
+
+    private static bool IsTableColumn(string value)
+    {
+        var parts = value.Split('.');
+        return parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]) && !string.IsNullOrWhiteSpace(parts[1]);
+    }
+
+    private static bool IsValidPeriod(string value)
+    {
+        // Relative: "14d", "2w", "6h", "30m", "45s"
+        if (value.Length > 1 && int.TryParse(value[..^1], out _) && "smhdw".Contains(value[^1]))
+        {
+            return true;
+        }
+
+        // Absolute range: "2026-07-01:2026-07-31"
+        var parts = value.Split(':');
+        return parts.Length == 2 &&
+               DateOnly.TryParse(parts[0], out _) &&
+               DateOnly.TryParse(parts[1], out _);
     }
 }
