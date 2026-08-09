@@ -7,7 +7,7 @@ namespace OneC.Infrastructure.Com;
 ///     Manages the lifecycle of a 1C COM session: connect, query, dispose.
 ///     Uses dynamic binding with Latin method names (NewObject, Query, etc.).
 /// </summary>
-public sealed class ComSession : IDisposable
+public sealed class ComSession : IComSession, IDisposable
 {
     private readonly ComConnector _connector;
     private readonly ILogger<ComSession> _logger;

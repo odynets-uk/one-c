@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -58,7 +59,7 @@ public sealed class GetCatalogService : IGetCatalogService
 
         session.Connect(decrypted);
 
-        var mapper = new ComValueMapper(Logging.CreateLogger<ComValueMapper>());
+        var mapper = new ComValueMapper(session, Logging.CreateLogger<ComValueMapper>());
         var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>());
 
         var records = reader.Read(profile, batchSize);
@@ -93,6 +94,8 @@ public sealed class GetCatalogService : IGetCatalogService
         var options = new JsonSerializerOptions
         {
             WriteIndented = pretty,
+            // Do not escape non-ASCII characters (Cyrillic) to \uXXXX — write them as-is.
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };
 
         var json = JsonSerializer.Serialize(records, options);

@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using OneC.Domain.Profiles;
+using OneC.Infrastructure.Com;
 
 namespace OneC.Infrastructure.Readers;
 
@@ -9,14 +11,17 @@ namespace OneC.Infrastructure.Readers;
 /// </summary>
 public sealed class ComValueMapper
 {
+    private readonly IComSession _session;
     private readonly ILogger<ComValueMapper> _logger;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="ComValueMapper" /> class.
     /// </summary>
+    /// <param name="session">An established COM session (used to normalize 1C empty values).</param>
     /// <param name="logger">Logger instance.</param>
-    public ComValueMapper(ILogger<ComValueMapper> logger)
+    public ComValueMapper(IComSession session, ILogger<ComValueMapper> logger)
     {
+        _session = session;
         _logger = logger;
     }
 
@@ -30,8 +35,11 @@ public sealed class ComValueMapper
     /// <exception cref="InvalidOperationException">When validation fails.</exception>
     public object? Map(object? rawValue, ProfileColumn column)
     {
-        // First: transform the raw value.
-        var transformed = ApplyTransform(rawValue, column.Transform);
+        // First: normalize 1C empty values (Undefined/NULL COM wrappers) to real null.
+        var normalized = Normalize(rawValue);
+
+        // Then: transform the raw value.
+        var transformed = ApplyTransform(normalized, column.Transform);
 
         // Normalize empty JSON elements (e.g. null/everything from 1C) to null.
         if (transformed is System.Text.Json.JsonElement je)
@@ -49,6 +57,46 @@ public sealed class ComValueMapper
         Validate(transformed, column);
 
         return transformed;
+    }
+
+    /// <summary>
+    ///     Converts 1C "Undefined" and database "NULL" COM values to real .NET null.
+    ///     The COM connector returns RCW wrappers (System.__ComObject) for 1C empty types,
+    ///     which would otherwise serialize as "{}" instead of null.
+    /// </summary>
+    private object? Normalize(object? value)
+    {
+        if (value is null || value is DBNull)
+        {
+            return null;
+        }
+
+        if (Marshal.IsComObject(value))
+        {
+            try
+            {
+                // Built-in 1C function: Строка(Неопределено) -> "", Строка(NULL) -> "Null".
+                var asString = _session.String(value);
+                if (string.IsNullOrEmpty(asString))
+                {
+                    return null; // Undefined / empty value.
+                }
+
+                // Also check the exact type name via ТипЗнч.
+                var typeName = _session.String(_session.Connection.ТипЗнч(value));
+                if (typeName is "Неопределено" or "Null")
+                {
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Failed to normalize COM value: {Message}", ex.Message);
+                return null;
+            }
+        }
+
+        return value;
     }
 
     private static object? ApplyTransform(object? value, string? transform)

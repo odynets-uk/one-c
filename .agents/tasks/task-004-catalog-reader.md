@@ -127,3 +127,5 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 | 2026-08-08 | Задача створена | backlog |
 | 2026-08-09 | Узгоджено формат профілю (brainstorming): transform, mode/batch_size як CLI параметри, валідація в коді, Code regex 9 цифр | in-progress |
 | 2026-08-09 | Вивчено методику з `1c_ex`: Query замість Выбрать(), InvokeMember для полів, _v8.String для конвертації | in-progress |
+| 2026-08-09 | Переписано CatalogReader на Query, тестовий витяг категорій працює (5 записів, GUID коректні) | in-progress |
+| 2026-08-09 | Виправлено нормалізацію вихідного JSON: порожні 1С-значення (Неопределено/NULL) → null замість {}; кирилиця без \uXXXX (Encoder=UnsafeRelaxedJsonEscaping). Додано IComSession + ComValueMapperTests (31 тестів проходять) | in-progress |

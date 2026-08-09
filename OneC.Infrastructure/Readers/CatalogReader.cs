@@ -202,18 +202,6 @@ public sealed class CatalogReader
                     _logger.LogWarning("Failed to read field '{Field}': {Message}", column.Source, ex.Message);
                 }
 
-                // If the value is still a COM object or empty JSON object (e.g. empty Комментарий), set null.
-                if (rawValue is not null && rawValue.GetType().IsCOMObject)
-                {
-                    rawValue = null;
-                }
-                else if (rawValue is System.Text.Json.JsonElement je2 &&
-                         je2.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                         !je2.EnumerateObject().Any())
-                {
-                    rawValue = null;
-                }
-
                 try
                 {
                     var mapped = _mapper.Map(rawValue, column);
