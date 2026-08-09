@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
@@ -54,7 +55,10 @@ public sealed class CatalogReader
             // 0. Load the set of category GUIDs (IsFolder = true) for 'exists' validation.
             //    Categories and products come from the same catalog (Номенклатура);
             //    products reference categories via Parent → category_id.
+            var categorySw = Stopwatch.StartNew();
             var categoryIdSet = LoadCategoryGuids(catalogName);
+            categorySw.Stop();
+            _logger.LogInformation("Stage category-guids done in {ElapsedMs} ms.", categorySw.ElapsedMilliseconds);
 
             // 1. Create a Query object (Latin method — works via dynamic).
             dynamic query = _session.Connection.NewObject("Query");
@@ -67,11 +71,11 @@ public sealed class CatalogReader
 
             _logger.LogInformation("Executing query: {QueryText}", (string)query.Text);
 
-            // 3. Execute (Latin methods).
+            // 3. Execute and iterate (Latin methods) — collect all records and their GUIDs first.
+            var iterSw = Stopwatch.StartNew();
             dynamic queryResult = query.Execute();
             dynamic selection = queryResult.Choose();
 
-            // 4. Iterate (Latin method) — collect all records and their GUIDs first.
             var count = 0;
             var itemGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             while (selection.Next())
@@ -90,12 +94,19 @@ public sealed class CatalogReader
                 records.Add(record);
                 count++;
 
+                if (count % 1000 == 0)
+                {
+                    _logger.LogInformation("Iterated {Count} catalog records...", count);
+                }
+
                 if (batchSize > 0 && count >= batchSize)
                 {
                     _logger.LogInformation("Batch limit reached: {BatchSize} records.", batchSize);
                     break;
                 }
             }
+            iterSw.Stop();
+            _logger.LogInformation("Stage catalog-iterate done: {Count} records in {ElapsedMs} ms.", count, iterSw.ElapsedMilliseconds);
 
             // 4b. Load price/stock data from registers. The registers are filtered
             //     by a 1C array of references (В (&ItemsArray)) for the collected
@@ -109,19 +120,36 @@ public sealed class CatalogReader
             {
                 // Build the GUID -> COM reference cache ONCE and reuse it
                 // across LoadPrices/LoadStock/LoadLastMovements.
+                var refCacheSw = Stopwatch.StartNew();
                 var refCache = _registerReader.BuildRefCache(itemGuids, catalogName);
+                refCacheSw.Stop();
+                _logger.LogInformation("Stage ref-cache done in {ElapsedMs} ms.", refCacheSw.ElapsedMilliseconds);
 
                 if (readPrices)
                 {
+                    var priceTypesSw = Stopwatch.StartNew();
                     var priceTypes = _registerReader.LoadPriceTypes();
                     priceTypesByGuid = priceTypes.ToDictionary(t => t.Guid, StringComparer.OrdinalIgnoreCase);
+                    priceTypesSw.Stop();
+                    _logger.LogInformation("Stage price-types done in {ElapsedMs} ms.", priceTypesSw.ElapsedMilliseconds);
+
+                    var pricesSw = Stopwatch.StartNew();
                     pricesByItem = _registerReader.LoadPrices(itemGuids, refCache);
+                    pricesSw.Stop();
+                    _logger.LogInformation("Stage prices done in {ElapsedMs} ms.", pricesSw.ElapsedMilliseconds);
                 }
 
                 if (readStock)
                 {
+                    var stockSw = Stopwatch.StartNew();
                     stockByItem = _registerReader.LoadStock(itemGuids, refCache);
+                    stockSw.Stop();
+                    _logger.LogInformation("Stage stock done in {ElapsedMs} ms.", stockSw.ElapsedMilliseconds);
+
+                    var lastMovSw = Stopwatch.StartNew();
                     lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache);
+                    lastMovSw.Stop();
+                    _logger.LogInformation("Stage last-movements done in {ElapsedMs} ms.", lastMovSw.ElapsedMilliseconds);
                 }
             }
 
