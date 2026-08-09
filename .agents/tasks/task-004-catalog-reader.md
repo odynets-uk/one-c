@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **ID** | `task-004-catalog-reader` |
-| **Статус** | `done` |
+| **Статус** | `in-progress` |
 | **Залежності** | `task-003-profiles` |
 | **Оцінка** | 4d |
 | **Пріоритет** | high |
@@ -131,3 +131,4 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 | 2026-08-09 | Виправлено нормалізацію вихідного JSON: порожні 1С-значення (Неопределено/NULL) → null замість {}; кирилиця без \uXXXX (Encoder=UnsafeRelaxedJsonEscaping). Додано IComSession + ComValueMapperTests (31 тестів проходять) | in-progress |
 | 2026-08-09 | Виправлено справжню причину "comment": {} — DBNull.Value серіалізувався як {}; додано DBNullJsonConverter (DBNull → JSON null) + DBNullJsonConverterTests (33 тести проходять) | in-progress |
 | 2026-08-09 | Виправлено parent_id для топових елементів: порожнє посилання 1С (нульовий GUID 00000000-0000-0000-0000-000000000000) → null через NormalizeGuid у GetRefId | in-progress |
+| 2026-08-09 | Рефакторинг GUID-логіки у Value Object OneCRef (OneC.Domain/ValueObjects): парсинг, нормалізація порожнього посилання, валідація (InvalidOperationException). CatalogReader.GetRefId використовує OneCRef. Додано OneCRefTests + entity-design-onecref.md (41 тест проходять) | in-progress |

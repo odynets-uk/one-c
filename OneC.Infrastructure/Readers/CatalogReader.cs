@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using OneC.Domain.Profiles;
+using OneC.Domain.ValueObjects;
 using OneC.Infrastructure.Com;
 
 namespace OneC.Infrastructure.Readers;
@@ -183,7 +184,7 @@ public sealed class CatalogReader
                         if (rawValue is not null && rawValue.GetType().IsCOMObject)
                         {
                             // Try to extract GUID (for Ref fields like Parent).
-                            // GetRefId returns null for an empty reference (all-zero GUID) → null.
+                            // OneCRef.FromString returns null for an empty reference (all-zero GUID) → null.
                             var guid = GetRefId(rawValue);
                             if (guid is not null)
                             {
@@ -266,7 +267,7 @@ public sealed class CatalogReader
                 null);
             if (guid is not null)
             {
-                return NormalizeGuid(_session.String(guid));
+                return OneCRef.FromString(_session.String(guid))?.ToString();
             }
         }
         catch (Exception ex)
@@ -285,7 +286,7 @@ public sealed class CatalogReader
                 null);
             if (refValue is not null && !refValue.GetType().IsCOMObject)
             {
-                return NormalizeGuid(_session.String(refValue));
+                return OneCRef.FromString(_session.String(refValue))?.ToString();
             }
         }
         catch (Exception ex)
@@ -295,21 +296,6 @@ public sealed class CatalogReader
 
         _logger.LogWarning("Failed to extract GUID from 1C reference object.");
         return null;
-    }
-
-    /// <summary>
-    ///     Returns null for an empty 1C reference (all-zero GUID), otherwise the GUID string.
-    /// </summary>
-    private static string? NormalizeGuid(string? guid)
-    {
-        if (string.IsNullOrWhiteSpace(guid))
-        {
-            return null;
-        }
-
-        // 1C empty reference GUID: 00000000-0000-0000-0000-000000000000
-        const string emptyGuid = "00000000-0000-0000-0000-000000000000";
-        return string.Equals(guid, emptyGuid, StringComparison.OrdinalIgnoreCase) ? null : guid;
     }
 
     private static object? ConvertToDbValue(object? value, ProfileColumn column)
