@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **ID** | `task-004-catalog-reader` |
-| **Статус** | `done` |
+| **Статус** | `in-progress` |
 | **Залежності** | `task-003-profiles` |
 | **Оцінка** | 4d |
 | **Пріоритет** | high |
@@ -120,6 +120,10 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 - Табличні частини — окремі записи або JSON
 - Маппінг: Ref → GUID string, Enum → string, decimal → decimal, bool → bool, dateTime → DateTime
 
+## TODO / Відомі проблеми
+
+- [ ] **Продуктивність**: COM-витяг цін/залишків дуже повільний (281 с на 8 товарів). Аудит: ймовірно `УникальныйИдентификатор` на кожному посиланні + повний прогін регістра. Винести в окрему під-задачу.
+
 ## Action log
 
 | Дата | Дія | Результат |
@@ -134,4 +138,5 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 | 2026-08-09 | Рефакторинг GUID-логіки у Value Object OneCRef (OneC.Domain/ValueObjects): парсинг, нормалізація порожнього посилання, валідація (InvalidOperationException). CatalogReader.GetRefId використовує OneCRef. Додано OneCRefTests + entity-design-onecref.md (41 тест проходять) | in-progress |
 | 2026-08-09 | Розширено формат профілю для products: validation.vo (OneCRef), validation.exists (runtime), validation.empty_to_null; filters.price_types/warehouses/changed_since (відносний/абсолютний); skip_items_without_prices/stock. CatalogReader: field_filters IN/LIKE, exists-перевірка. GetCatalogService: профілювання час/CPU/RAM. Створено profiles/products.json, уніфіковано categories.json. 57 тестів проходять | in-progress |
 | 2026-08-09 | Виправлено exists-валідацію: LoadCategoryGuids витягує всі GUID категорій (IsFolder=true) з 1С перед витягом товарів; MapRecord не додає id товарів у множину категорій | in-progress |
-| 2026-08-09 | Завершено: всі критерії готовності виконані, 57 тестів проходять, статус оновлено на done | done |
+| 2026-08-09 | Розширено на читання цін/залишків з регістрів: RegisterDataReader (типи цін з Справочник.ТипыЦенНоменклатуры, сирий регістр ЦеныНоменклатуры, Остатки/рухи ТоварыНаСкладах). Логіка за legacy export1.py: price = cost*(1+markup_pct/100) для розрахункових, price = base_cost для закупівельної. Пристібання до номенклатури через GUID. Результати збігаються з пітонівським скриптом. Коміт b5be5a8 | in-progress |
+| 2026-08-09 | **Повільність**: COM-витяг цін/залишків займає кілька хвилин (281 с на 8 товарів). Потрібен рефактор/аудит продуктивності — окрема під-задача | in-progress |
