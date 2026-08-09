@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using OneC.Application.Abstractions.Services;
 using OneC.Domain.Profiles;
 using OneC.Infrastructure.Com;
+using OneC.Infrastructure.Json;
 using OneC.Infrastructure.Profiles;
 using OneC.Infrastructure.Readers;
 using OneC.Infrastructure.Security;
@@ -96,6 +97,8 @@ public sealed class GetCatalogService : IGetCatalogService
             WriteIndented = pretty,
             // Do not escape non-ASCII characters (Cyrillic) to \uXXXX — write them as-is.
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            // DBNull (used for null DB values) must serialize as JSON null, not "{}".
+            Converters = { new DBNullJsonConverter() },
         };
 
         var json = JsonSerializer.Serialize(records, options);
