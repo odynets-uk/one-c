@@ -1,0 +1,98 @@
+{
+  "name": "categories",
+  "source": {
+    "type": "CatalogObject.Номенклатура",
+    "schema": "./data-enterprise.xsd"
+  },
+  "mode": "full",
+  "batch_size": -1,
+  "filters": {
+    "field_filters": {
+      "IsFolder": true
+    }
+  },
+  "output": {
+    "json": {
+      "file_path": "export/categories.json",
+      "pretty": true
+    },
+    "db": {
+      "file_path": "export/kplus.db",
+      "engine": "sqlite",
+      "version": "3.37+"
+    }
+  },
+  "table": "categories",
+  "columns": [
+    {
+      "source": "Ref",
+      "name": "id",
+      "sql_type": "TEXT PRIMARY KEY",
+      "validation": {
+        "required": true,
+        "regex": "^[a-f0-9-]{36}$",
+        "case": "insensitive"
+      }
+    },
+    {
+      "source": "Parent",
+      "name": "parent_id",
+      "sql_type": "TEXT",
+      "validation": {
+        "nullable": true,
+        "regex": "^[a-f0-9-]{36}$"
+      }
+    },
+    {
+      "source": "Code",
+      "name": "legacy_id",
+      "sql_type": "TEXT NOT NULL",
+      "validation": {
+        "required": true,
+        "unique": true,
+        "regex": "^\\d{9}$"
+      }
+    },
+    {
+      "source": "Description",
+      "name": "name",
+      "sql_type": "TEXT",
+      "validation": {
+        "nullable": true,
+        "min_length": 1
+      }
+    },
+    {
+      "source": "Комментарий",
+      "name": "comment",
+      "sql_type": "TEXT",
+      "validation": {
+        "nullable": true,
+        "min_length": 1
+      }
+    },
+    {
+      "source": "DeletionMark",
+      "name": "is_active",
+      "sql_type": "INTEGER NOT NULL DEFAULT 1",
+      "transform": "NOT {value}",
+      "validation": {
+        "boolean": "strict"
+      }
+    }
+  ],
+  "references": [
+    {
+      "column": "parent_id",
+      "references": "categories(id)",
+      "on_delete": "RESTRICT",
+      "on_update": "NO ACTION"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "categories_parent_id_index",
+      "columns": ["parent_id"]
+    }
+  ]
+}

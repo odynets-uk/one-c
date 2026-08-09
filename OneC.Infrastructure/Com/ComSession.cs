@@ -42,6 +42,17 @@ public sealed class ComSession : IDisposable
     }
 
     /// <summary>
+    ///     Converts a COM value (e.g. Ref/GUID) to a string using the 1C String() function.
+    /// </summary>
+    /// <param name="value">COM value.</param>
+    /// <returns>String representation.</returns>
+    public string String(object value)
+    {
+        var result = Connection.String(value);
+        return result?.ToString() ?? string.Empty;
+    }
+
+    /// <summary>
     ///     Tests the connection by executing a simple query (SELECT 1).
     ///     This verifies the COM connection and query execution mechanism.
     /// </summary>

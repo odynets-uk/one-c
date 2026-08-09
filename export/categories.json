@@ -1,0 +1,42 @@
+[
+  {
+    "id": "9d8fb587-9a93-11e6-80e0-1078d2d7c888",
+    "parent_id": "69cd4515-f485-11e4-9419-000c2992a1b4",
+    "legacy_id": "000005906",
+    "name": "\u041D\u0435\u0434\u0430\u0442\u043E\u0432\u0430\u043D\u0456",
+    "comment": {},
+    "is_active": 1
+  },
+  {
+    "id": "9d8fb588-9a93-11e6-80e0-1078d2d7c888",
+    "parent_id": "9d8fb587-9a93-11e6-80e0-1078d2d7c888",
+    "legacy_id": "000005907",
+    "name": "ECONOMIX",
+    "comment": {},
+    "is_active": 1
+  },
+  {
+    "id": "9d8fb589-9a93-11e6-80e0-1078d2d7c888",
+    "parent_id": "9d8fb587-9a93-11e6-80e0-1078d2d7c888",
+    "legacy_id": "000005908",
+    "name": "OPTIMA",
+    "comment": {},
+    "is_active": 1
+  },
+  {
+    "id": "9d8fb58a-9a93-11e6-80e0-1078d2d7c888",
+    "parent_id": "9d8fb587-9a93-11e6-80e0-1078d2d7c888",
+    "legacy_id": "000005909",
+    "name": "BUROMAX",
+    "comment": {},
+    "is_active": 1
+  },
+  {
+    "id": "9d8fb58b-9a93-11e6-80e0-1078d2d7c888",
+    "parent_id": "ec283546-1b34-11e5-942a-000c2992a1b4",
+    "legacy_id": "000005910",
+    "name": "Delta",
+    "comment": {},
+    "is_active": 1
+  }
+]

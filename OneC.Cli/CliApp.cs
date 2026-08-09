@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using OneC.Application.Abstractions.Services;
+using OneC.Infrastructure.Profiles;
 
 namespace OneC.Cli;
 
@@ -10,6 +11,7 @@ public sealed class CliApp
 {
     private readonly ITestConnectionService _testConnectionService;
     private readonly IMetadataService _metadataService;
+    private readonly IGetCatalogService _getCatalogService;
     private readonly ILogger<CliApp> _logger;
 
     /// <summary>
@@ -21,10 +23,12 @@ public sealed class CliApp
     public CliApp(
         ITestConnectionService testConnectionService,
         IMetadataService metadataService,
+        IGetCatalogService getCatalogService,
         ILogger<CliApp> logger)
     {
         _testConnectionService = testConnectionService;
         _metadataService = metadataService;
+        _getCatalogService = getCatalogService;
         _logger = logger;
     }
 
@@ -54,6 +58,10 @@ public sealed class CliApp
 
             case "show-catalog":
                 await ShowCatalogAsync(args, cancellationToken);
+                break;
+
+            case "get-catalog":
+                await GetCatalogAsync(args, cancellationToken);
                 break;
 
             case "help":
@@ -186,6 +194,64 @@ public sealed class CliApp
         }
     }
 
+    private async Task GetCatalogAsync(string[] args, CancellationToken cancellationToken)
+    {
+        // Usage: get-catalog --profile categories [--mode full|incremental] [--batch-size N]
+        var profilePath = GetFlagValue(args, "--profile");
+        if (string.IsNullOrWhiteSpace(profilePath))
+        {
+            Console.WriteLine("Usage: OneC.Cli get-catalog --profile <profile-file.json> [--mode full|incremental] [--batch-size N]");
+            return;
+        }
+
+        var mode = GetFlagValue(args, "--mode") ?? "full";
+        var batchSize = GetBatchSize(args);
+
+        try
+        {
+            var profile = ProfileLoader.Load(profilePath);
+            var count = await _getCatalogService.ExecuteAsync(profile, batchSize, cancellationToken);
+
+            Console.WriteLine();
+            Console.WriteLine($"=== Catalog Extraction ===");
+            Console.WriteLine($"  Profile:     {profile.Name}");
+            Console.WriteLine($"  Mode:        {mode}");
+            Console.WriteLine($"  Batch size:  {batchSize}");
+            Console.WriteLine($"  Records:     {count}");
+            Console.WriteLine("===========================");
+            Console.WriteLine();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get catalog: {ErrorMessage}", ex.Message);
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+    private static string? GetFlagValue(string[] args, string flag)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static int GetBatchSize(string[] args)
+    {
+        var value = GetFlagValue(args, "--batch-size");
+        if (int.TryParse(value, out var parsed))
+        {
+            return parsed;
+        }
+
+        return -1; // Default: all records.
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
@@ -199,6 +265,7 @@ public sealed class CliApp
                              list-catalogs      List catalogs from XSD schema
                              list-enums         List enums from XSD schema
                              show-catalog <name> Show catalog fields with types
+                             get-catalog --profile <file> [--mode full|incremental] [--batch-size N]
                              help               Show this help
 
                            Examples:
@@ -206,6 +273,7 @@ public sealed class CliApp
                              OneC.Cli list-catalogs
                              OneC.Cli list-enums
                              OneC.Cli show-catalog Номенклатура
+                             OneC.Cli get-catalog --profile profiles/categories.json --batch-size -1
                            """);
     }
 }

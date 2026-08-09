@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddSingleton<ComRegistrationService>();
         services.AddScoped<ITestConnectionService, TestConnectionService>();
         services.AddScoped<IMetadataService, MetadataService>();
+        services.AddScoped<IGetCatalogService, GetCatalogService>();
 
         return services;
     }
