@@ -22,7 +22,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Content Include="..\CatalogObject.Номенклатура.xsd" Link="CatalogObject.Номенклатура.xsd">
+        <Content Include="TestData\CatalogObject.Номенклатура.xsd" Link="CatalogObject.Номенклатура.xsd">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
     </ItemGroup>

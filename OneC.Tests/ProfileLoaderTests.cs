@@ -62,8 +62,8 @@ public class ProfileLoaderTests
         Assert.Equal("categories", profile.Table);
         Assert.Equal(6, profile.Columns.Count);
         Assert.Equal("NOT {value}", profile.Columns[5].Transform);
-        Assert.Equal(1, profile.References.Count);
-        Assert.Equal(1, profile.Indexes.Count);
+        Assert.Single(profile.References);
+        Assert.Single(profile.Indexes);
         Assert.True(profile.Filters!.FieldFilters.ContainsKey("IsFolder"));
     }
 
