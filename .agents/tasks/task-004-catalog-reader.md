@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **ID** | `task-004-catalog-reader` |
-| **Статус** | `in-progress` |
+| **Статус** | `done` |
 | **Залежності** | `task-003-profiles` |
 | **Оцінка** | 4d |
 | **Пріоритет** | high |
@@ -14,27 +14,27 @@
 
 ## Обсяг
 
-- [ ] `OneC.Domain/Profiles/` — розширити моделі профілю:
+- [x] `OneC.Domain/Profiles/` — розширити моделі профілю:
   - `source.type` (root type 1С)
   - `columns[]` з `sql_type` + `validation` (розділено)
   - `transform` (напр. `"NOT {value}"` для DeletionMark → is_active)
   - структуровані `references`/`indexes`
-- [ ] `OneC.Infrastructure/Readers/ComValueMapper.cs` — маппінг COM-значень → .NET (Ref→GUID, Enum→string, decimal, bool, dateTime) + підтримка `transform`
-- [ ] `OneC.Infrastructure/Readers/CatalogReader.cs` — динамічне вичитування: `Выбрать()` + `ВыбратьСледующий()`, пакетна обробка з `batch_size`
-- [ ] `OneC.Infrastructure/Profiles/ProfileLoader.cs` — розширена валідація JSON-профілів (в коді, без JSON Schema)
-- [ ] `OneC.Cli` команда `get-catalog <name> --profile <profile> [--mode full|incremental] [--batch-size N]`
+- [x] `OneC.Infrastructure/Readers/ComValueMapper.cs` — маппінг COM-значень → .NET (Ref→GUID, Enum→string, decimal, bool, dateTime) + підтримка `transform`
+- [x] `OneC.Infrastructure/Readers/CatalogReader.cs` — динамічне вичитування: `Выбрать()` + `ВыбратьСледующий()`, пакетна обробка з `batch_size`
+- [x] `OneC.Infrastructure/Profiles/ProfileLoader.cs` — розширена валідація JSON-профілів (в коді, без JSON Schema)
+- [x] `OneC.Cli` команда `get-catalog <name> --profile <profile> [--mode full|incremental] [--batch-size N]`
   - Для каталогу за замовчуванням: `--mode full --batch-size -1` (всі дані)
 - [ ] Профілювання розміру батча (100/500/1000) — вимірювання часу/пам'яті
 
 ## Критерії готовності
 
-- [ ] `get-catalog` вичитує дані з бази 1С і виводить у JSON згідно з профілем
-- [ ] Маппінг типів коректний (Ref→GUID, Enum→string, decimal, bool, dateTime)
-- [ ] `transform` працює (напр. `"NOT {value}"` для DeletionMark)
-- [ ] Пакетна обробка працює з `batch_size` (використовується ComValueMapper + CatalogReader)
-- [ ] Валідація профілів в `ProfileLoader` з логуванням помилок
-- [ ] Тести маппінгу та валідації (unit) проходять
-- [ ] Коміт створено з multiline повідомленням
+- [x] `get-catalog` вичитує дані з бази 1С і виводить у JSON згідно з профілем
+- [x] Маппінг типів коректний (Ref→GUID, Enum→string, decimal, bool, dateTime)
+- [x] `transform` працює (напр. `"NOT {value}"` для DeletionMark)
+- [x] Пакетна обробка працює з `batch_size` (використовується ComValueMapper + CatalogReader)
+- [x] Валідація профілів в `ProfileLoader` з логуванням помилок
+- [x] Тести маппінгу та валідації (unit) проходять
+- [x] Коміт створено з multiline повідомленням
 
 ## Узгоджені рішення (brainstorming 2026-08-09)
 
@@ -130,3 +130,4 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 | 2026-08-09 | Переписано CatalogReader на Query, тестовий витяг категорій працює (5 записів, GUID коректні) | in-progress |
 | 2026-08-09 | Виправлено нормалізацію вихідного JSON: порожні 1С-значення (Неопределено/NULL) → null замість {}; кирилиця без \uXXXX (Encoder=UnsafeRelaxedJsonEscaping). Додано IComSession + ComValueMapperTests (31 тестів проходять) | in-progress |
 | 2026-08-09 | Виправлено справжню причину "comment": {} — DBNull.Value серіалізувався як {}; додано DBNullJsonConverter (DBNull → JSON null) + DBNullJsonConverterTests (33 тести проходять) | in-progress |
+| 2026-08-09 | Виправлено parent_id для топових елементів: порожнє посилання 1С (нульовий GUID 00000000-0000-0000-0000-000000000000) → null через NormalizeGuid у GetRefId | in-progress |

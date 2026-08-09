@@ -183,6 +183,7 @@ public sealed class CatalogReader
                         if (rawValue is not null && rawValue.GetType().IsCOMObject)
                         {
                             // Try to extract GUID (for Ref fields like Parent).
+                            // GetRefId returns null for an empty reference (all-zero GUID) → null.
                             var guid = GetRefId(rawValue);
                             if (guid is not null)
                             {
@@ -190,7 +191,7 @@ public sealed class CatalogReader
                             }
                             else
                             {
-                                // Not a Ref — convert to string (empty/{} → null).
+                                // Not a Ref or empty reference — convert to string (empty/{} → null).
                                 var str = _session.String(rawValue);
                                 rawValue = string.IsNullOrWhiteSpace(str) || str == "{}" ? null : str;
                             }
@@ -248,6 +249,7 @@ public sealed class CatalogReader
     ///     Extracts the GUID from a 1C COM reference object.
     ///     String(ref) in 1C returns the display name (Description),
     ///     so we must call УникальныйИдентификатор / Ref to get the actual GUID.
+    ///     An empty reference (all-zero GUID) is returned as null.
     /// </summary>
     private string? GetRefId(object refObject)
     {
@@ -264,7 +266,7 @@ public sealed class CatalogReader
                 null);
             if (guid is not null)
             {
-                return _session.String(guid);
+                return NormalizeGuid(_session.String(guid));
             }
         }
         catch (Exception ex)
@@ -283,7 +285,7 @@ public sealed class CatalogReader
                 null);
             if (refValue is not null && !refValue.GetType().IsCOMObject)
             {
-                return _session.String(refValue);
+                return NormalizeGuid(_session.String(refValue));
             }
         }
         catch (Exception ex)
@@ -293,6 +295,21 @@ public sealed class CatalogReader
 
         _logger.LogWarning("Failed to extract GUID from 1C reference object.");
         return null;
+    }
+
+    /// <summary>
+    ///     Returns null for an empty 1C reference (all-zero GUID), otherwise the GUID string.
+    /// </summary>
+    private static string? NormalizeGuid(string? guid)
+    {
+        if (string.IsNullOrWhiteSpace(guid))
+        {
+            return null;
+        }
+
+        // 1C empty reference GUID: 00000000-0000-0000-0000-000000000000
+        const string emptyGuid = "00000000-0000-0000-0000-000000000000";
+        return string.Equals(guid, emptyGuid, StringComparison.OrdinalIgnoreCase) ? null : guid;
     }
 
     private static object? ConvertToDbValue(object? value, ProfileColumn column)
