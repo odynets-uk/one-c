@@ -172,24 +172,6 @@ public sealed class RegisterDataReader
         return new RefCache { ByGuid = byGuid };
     }
 
-    /// <summary>
-    ///     The raw register query (full price history). Used as a fallback if
-    ///     СрезПоследних (latest slice) throws a non-fatal COM exception.
-    /// </summary>
-    private const string RawPricesQuery = """
-                                          SELECT
-                                              Цены.Номенклатура AS Item,
-                                              Цены.ТипЦен AS PriceType,
-                                              Цены.Цена AS Price,
-                                              Цены.ПроцентСкидкиНаценки AS MarkupPct,
-                                              Цены.ЕдиницаИзмерения AS Unit,
-                                              Цены.Период AS Period
-                                          FROM
-                                              РегистрСведений.ЦеныНоменклатуры AS Цены
-                                          WHERE
-                                              Цены.Номенклатура В (&ItemsArray)
-                                          """;
-
     public Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
         RefCache refCache)
@@ -197,82 +179,35 @@ public sealed class RegisterDataReader
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var batch in itemGuids.Chunk(RefBatchSize))
-        {
-            dynamic v8Array = CreateRefArray(batch, refCache);
+        // Load the ENTIRE latest price slice (СрезПоследних without a В-filter).
+        // The В (&ItemsArray) filter with 13k+ refs is what made 1C take ~250s.
+        // Without the filter this is ONE fast query (like stock ~4s); matching to
+        // the requested items happens in .NET via GUID. CatalogReader only builds
+        // prices for the items it read, so extra rows are simply ignored.
+        dynamic query = _session.Connection.NewObject("Query");
+        query.Text = """
+                     SELECT
+                         Цены.Номенклатура AS Item,
+                         Цены.ТипЦен AS PriceType,
+                         Цены.Цена AS Price,
+                         Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                         Цены.ЕдиницаИзмерения AS Unit,
+                         Цены.Период AS Period
+                     FROM
+                         РегистрСведений.ЦеныНоменклатуры.СрезПоследних() AS Цены
+                     """;
 
-            // Try СрезПоследних (latest price slice) first — reads only the latest
-            // price per (item, type) instead of the entire history (which is ~100x
-            // slower — 946s out of the 1002s total on the full base).
-            // The condition parameter after the comma is the standard 1C syntax for
-            // omitting the period. Falls back to the raw register if it throws.
-            if (!TryLoadPriceSlice(v8Array, refCache, result))
-            {
-                _logger.LogWarning("СрезПоследних failed, falling back to raw price register.");
-                LoadPricesRaw(v8Array, refCache, result);
-            }
-        }
+        dynamic table = query.Execute().Unload();
+        ProcessPriceTable(table, refCache, result);
 
         _logger.LogInformation("Loaded prices for {Count} items in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
         return result;
     }
 
     /// <summary>
-    ///     Attempts to load the latest price slice via СрезПоследних.
-    ///     Returns false (without rethrowing) if the query throws a COMException.
-    /// </summary>
-    private bool TryLoadPriceSlice(
-        dynamic v8Array,
-        RefCache refCache,
-        Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
-    {
-        try
-        {
-            dynamic query = _session.Connection.NewObject("Query");
-            query.Text = """
-                         SELECT
-                             Цены.Номенклатура AS Item,
-                             Цены.ТипЦен AS PriceType,
-                             Цены.Цена AS Price,
-                             Цены.ПроцентСкидкиНаценки AS MarkupPct,
-                             Цены.ЕдиницаИзмерения AS Unit,
-                             Цены.Период AS Period
-                         FROM
-                             РегистрСведений.ЦеныНоменклатуры.СрезПоследних(, Номенклатура В (&ItemsArray)) AS Цены
-                         """;
-            query.SetParameter("ItemsArray", v8Array);
-
-            dynamic table = query.Execute().Unload();
-            ProcessPriceTable(table, refCache, result);
-            return true;
-        }
-        catch (COMException ex)
-        {
-            _logger.LogWarning("СрезПоследних COMException ({HResult}): {Message}", ex.HResult, ex.Message);
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///     Loads prices from the raw register (full history) and keeps the latest per (item, type).
-    /// </summary>
-    private void LoadPricesRaw(
-        dynamic v8Array,
-        RefCache refCache,
-        Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
-    {
-        dynamic query = _session.Connection.NewObject("Query");
-        query.Text = RawPricesQuery;
-        query.SetParameter("ItemsArray", v8Array);
-
-        dynamic table = query.Execute().Unload();
-        ProcessPriceTable(table, refCache, result);
-    }
-
-    /// <summary>
     ///     Reads the price result table into the result dictionary,
     ///     keeping the latest record per (item, type). Resolves item/price-type
-    ///     GUIDs via the reverse IUnknown map — no COM round-trip per row.
+    ///     GUIDs via the per-RCW cache — a GUID is resolved once per unique reference.
     /// </summary>
     private void ProcessPriceTable(
         dynamic table,
