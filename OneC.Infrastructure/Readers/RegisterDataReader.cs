@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using OneC.Infrastructure.Com;
@@ -17,6 +19,12 @@ public sealed class RegisterDataReader
 {
     private readonly ComSession _session;
     private readonly ILogger _logger;
+
+    // Cache COM reference -> GUID string and COM reference -> display name.
+    // Avoids repeated COM round-trips (УникальныйИдентификатор / Description)
+    // for the same reference object appearing in many rows.
+    private readonly ConditionalWeakTable<object, string> _guidCache = new();
+    private readonly ConditionalWeakTable<object, string> _nameCache = new();
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="RegisterDataReader" /> class.
@@ -60,10 +68,19 @@ public sealed class RegisterDataReader
         string LastMovement);
 
     /// <summary>
+    ///     Represents a single stock row grouped by item GUID.
+    /// </summary>
+    public sealed record StockRow(
+        string WarehouseGuid,
+        string WarehouseName,
+        decimal Quantity);
+
+    /// <summary>
     ///     Loads all price types from the catalog.
     /// </summary>
     public IReadOnlyList<PriceTypeInfo> LoadPriceTypes()
     {
+        var sw = Stopwatch.StartNew();
         var result = new List<PriceTypeInfo>();
         dynamic query = _session.Connection.NewObject("Query");
         query.Text = """
@@ -98,21 +115,26 @@ public sealed class RegisterDataReader
                 ToDecimal(row.MarkupPercent)));
         }
 
-        _logger.LogInformation("Loaded {Count} price types.", result.Count);
+        _logger.LogInformation("Loaded {Count} price types in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
         return result;
     }
 
     /// <summary>
     ///     Loads the latest known value of each (item, price_type) pair from the
-    ///     raw prices register. Mirrors export1.py read_prices():
-    ///     reads all records, keeps the latest per (item, type).
+    ///     prices register. Mirrors export1.py read_prices().
+    ///     Filters the register by the catalog's WHERE clause via a subquery —
+    ///     avoids loading the entire register history.
     ///     Returns: itemGuid -> { typeGuid -> (Цена, ПроцентСкидкиНаценки, unit, period) }.
     /// </summary>
-    public Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> LoadPrices()
+    public Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> LoadPrices(
+        string catalogName,
+        string catalogWhereClause)
     {
+        var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>>(StringComparer.OrdinalIgnoreCase);
         dynamic query = _session.Connection.NewObject("Query");
-        query.Text = """
+        var subquery = $"SELECT {catalogName}.Ref FROM Справочник.{catalogName} AS {catalogName} {catalogWhereClause}";
+        query.Text = $"""
                      SELECT
                          Цены.Номенклатура AS Item,
                          Цены.ТипЦен AS PriceType,
@@ -122,6 +144,8 @@ public sealed class RegisterDataReader
                          Цены.Период AS Period
                      FROM
                          РегистрСведений.ЦеныНоменклатуры AS Цены
+                     WHERE
+                         Цены.Номенклатура IN ({subquery})
                      """;
 
         dynamic table = query.Execute().Unload();
@@ -135,10 +159,13 @@ public sealed class RegisterDataReader
                 continue;
             }
 
-            var unit = GetRefName(row.Unit);
-            var price = ToDecimal(row.Price);
-            var markupPct = ToDecimal(row.MarkupPct);
-            var period = FormatDateTime(row.Period);
+            // Explicitly typed variables: row.X is dynamic, so ToDecimal/GetRefName
+            // results would otherwise be typed dynamic → tuple literal becomes
+            // ValueTuple<object,...> which cannot be stored in ValueTuple<decimal,decimal,string,string>.
+            string unit = GetRefName(row.Unit);
+            decimal price = ToDecimal(row.Price);
+            decimal markupPct = ToDecimal(row.MarkupPct);
+            string period = FormatDateTime(row.Period);
             var entry = new ValueTuple<decimal, decimal, string, string>(price, markupPct, unit, period);
 
             if (!result.TryGetValue(itemGuid, out Dictionary<string, (decimal, decimal, string, string)>? types))
@@ -148,26 +175,31 @@ public sealed class RegisterDataReader
             }
 
             // Keep the latest record for this (item, type).
-            if (!types.TryGetValue(typeGuid, out (decimal, decimal, string, string) existing)
+            if (!types!.TryGetValue(typeGuid, out (decimal, decimal, string, string) existing)
                 || string.CompareOrdinal(entry.Item4, existing.Item4) > 0)
             {
                 types[typeGuid] = entry;
             }
         }
 
-        _logger.LogInformation("Loaded prices for {Count} items.", result.Count);
+        _logger.LogInformation("Loaded prices for {Count} items in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
         return result;
     }
 
     /// <summary>
-    ///     Loads current warehouse remainders (non-zero).
-    ///     Returns a list of (itemGuid, warehouseGuid, warehouseName, quantity).
+    ///     Loads current warehouse remainders (non-zero), grouped by item GUID.
+    ///     Filters by the catalog's WHERE clause via a subquery.
+    ///     Returns: itemGuid -> list of (warehouseGuid, warehouseName, quantity).
     /// </summary>
-    public List<(string ItemGuid, string WarehouseGuid, string WarehouseName, decimal Quantity)> LoadStock()
+    public Dictionary<string, List<StockRow>> LoadStock(
+        string catalogName,
+        string catalogWhereClause)
     {
-        var result = new List<(string, string, string, decimal)>();
+        var sw = Stopwatch.StartNew();
+        var result = new Dictionary<string, List<StockRow>>(StringComparer.OrdinalIgnoreCase);
         dynamic query = _session.Connection.NewObject("Query");
-        query.Text = """
+        var subquery = $"SELECT {catalogName}.Ref FROM Справочник.{catalogName} AS {catalogName} {catalogWhereClause}";
+        query.Text = $"""
                      SELECT
                          Остатки.Номенклатура AS Item,
                          Остатки.Склад AS Warehouse,
@@ -176,6 +208,7 @@ public sealed class RegisterDataReader
                          РегистрНакопления.ТоварыНаСкладах.Остатки() AS Остатки
                      WHERE
                          Остатки.КоличествоОстаток <> 0
+                         AND Остатки.Номенклатура IN ({subquery})
                      """;
 
         dynamic table = query.Execute().Unload();
@@ -189,28 +222,41 @@ public sealed class RegisterDataReader
                 continue;
             }
 
-            result.Add((itemGuid, whGuid, GetRefName(row.Warehouse), ToDecimal(row.Quantity)));
+            if (!result.TryGetValue(itemGuid, out List<StockRow>? rows))
+            {
+                rows = new List<StockRow>();
+                result[itemGuid] = rows;
+            }
+
+            rows!.Add(new StockRow(whGuid, GetRefName(row.Warehouse), ToDecimal(row.Quantity)));
         }
 
-        _logger.LogInformation("Loaded {Count} stock rows.", result.Count);
+        _logger.LogInformation("Loaded stock for {Count} items in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
         return result;
     }
 
     /// <summary>
     ///     Loads the last movement date per item+warehouse.
+    ///     Filters by the catalog's WHERE clause via a subquery.
     ///     Returns a dictionary keyed by "itemGuid_warehouseGuid".
     /// </summary>
-    public Dictionary<string, string> LoadLastMovements()
+    public Dictionary<string, string> LoadLastMovements(
+        string catalogName,
+        string catalogWhereClause)
     {
+        var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         dynamic query = _session.Connection.NewObject("Query");
-        query.Text = """
+        var subquery = $"SELECT {catalogName}.Ref FROM Справочник.{catalogName} AS {catalogName} {catalogWhereClause}";
+        query.Text = $"""
                      SELECT
                          Рух.Номенклатура AS Item,
                          Рух.Склад AS Warehouse,
                          MAX(Рух.Период) AS LastMovement
                      FROM
                          РегистрНакопления.ТоварыНаСкладах AS Рух
+                     WHERE
+                         Рух.Номенклатура IN ({subquery})
                      GROUP BY
                          Рух.Номенклатура,
                          Рух.Склад
@@ -230,7 +276,7 @@ public sealed class RegisterDataReader
             result[itemGuid + "_" + whGuid] = FormatDateTime(row.LastMovement);
         }
 
-        _logger.LogInformation("Loaded {Count} last movement rows.", result.Count);
+        _logger.LogInformation("Loaded {Count} last movement rows in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
         return result;
     }
 
@@ -245,9 +291,10 @@ public sealed class RegisterDataReader
 
     public List<PriceEntry> BuildPrices(
         string itemGuid,
-        IReadOnlyList<PriceTypeInfo> priceTypes,
+        IReadOnlyDictionary<string, PriceTypeInfo> priceTypesByGuid,
         Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> pricesByItem)
     {
+        var sw = Stopwatch.StartNew();
         var result = new List<PriceEntry>();
         if (!pricesByItem.TryGetValue(itemGuid, out var itemPrices))
         {
@@ -256,7 +303,7 @@ public sealed class RegisterDataReader
 
         // Latest known cost price for this item (used as base for calculated types).
         decimal cost = 0m;
-        foreach (var type in priceTypes)
+        foreach (var type in priceTypesByGuid.Values)
         {
             if (!type.Name.Equals(CostPriceTypeName, StringComparison.OrdinalIgnoreCase))
             {
@@ -270,7 +317,7 @@ public sealed class RegisterDataReader
             break;
         }
 
-        foreach (var type in priceTypes)
+        foreach (var type in priceTypesByGuid.Values)
         {
             if (!itemPrices.TryGetValue(type.Guid, out var priceRow))
             {
@@ -307,25 +354,27 @@ public sealed class RegisterDataReader
             }
         }
 
+        _logger.LogDebug("Built {Count} prices for item {ItemGuid} in {ElapsedMs} ms.", result.Count, itemGuid, sw.ElapsedMilliseconds);
         return result;
     }
 
     /// <summary>
-    ///     Builds the stock list for a given item GUID.
+    ///     Builds the stock list for a given item GUID using a pre-grouped dictionary.
     /// </summary>
     public List<StockEntry> BuildStock(
         string itemGuid,
-        List<(string ItemGuid, string WarehouseGuid, string WarehouseName, decimal Quantity)> stockRows,
+        Dictionary<string, List<StockRow>> stockByItem,
         Dictionary<string, string> lastMovements)
     {
+        var sw = Stopwatch.StartNew();
         var result = new List<StockEntry>();
-        foreach (var row in stockRows)
+        if (!stockByItem.TryGetValue(itemGuid, out var rows))
         {
-            if (!row.ItemGuid.Equals(itemGuid, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            return result;
+        }
 
+        foreach (var row in rows)
+        {
             var key = itemGuid + "_" + row.WarehouseGuid;
             lastMovements.TryGetValue(key, out var lastMovement);
 
@@ -336,6 +385,7 @@ public sealed class RegisterDataReader
                 lastMovement ?? string.Empty));
         }
 
+        _logger.LogDebug("Built {Count} stock entries for item {ItemGuid} in {ElapsedMs} ms.", result.Count, itemGuid, sw.ElapsedMilliseconds);
         return result;
     }
 
@@ -351,6 +401,18 @@ public sealed class RegisterDataReader
             return null;
         }
 
+        if (_guidCache.TryGetValue(refObject, out var cached))
+        {
+            return string.IsNullOrEmpty(cached) ? null : cached;
+        }
+
+        var value = ExtractRefGuid(refObject);
+        _guidCache.Add(refObject, value ?? string.Empty);
+        return value;
+    }
+
+    private string? ExtractRefGuid(object refObject)
+    {
         // Extract the GUID via УникальныйИдентификатор (like CatalogReader.GetRefId).
         // String(ref) in 1C returns the display name, not the GUID.
         try
@@ -387,6 +449,18 @@ public sealed class RegisterDataReader
             return refObject.ToString() ?? string.Empty;
         }
 
+        if (_nameCache.TryGetValue(refObject, out var cached))
+        {
+            return cached;
+        }
+
+        var name = ExtractRefName(refObject);
+        _nameCache.Add(refObject, name);
+        return name;
+    }
+
+    private string ExtractRefName(object refObject)
+    {
         try
         {
             var type = refObject.GetType();
