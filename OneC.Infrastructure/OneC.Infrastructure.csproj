@@ -17,6 +17,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\OneC.Application\OneC.Application.csproj"/>
+        <ProjectReference Include="..\OneC.Domain\OneC.Domain.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

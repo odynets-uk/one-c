@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using OneC.Application.Abstractions.Services;
 using OneC.Domain.Profiles;
+using OneC.Domain.Register;
 using OneC.Infrastructure.Com;
 using OneC.Infrastructure.Json;
 using OneC.Infrastructure.Profiles;
@@ -62,7 +63,24 @@ public sealed class GetCatalogService : IGetCatalogService
         session.Connect(decrypted);
 
         var mapper = new ComValueMapper(session, Logging.CreateLogger<ComValueMapper>());
-        var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>());
+        var resolver = new ReferenceResolver(session, Logging.CreateLogger<ReferenceResolver>());
+        var refCacheBuilder = new RefCacheBuilder(session, Logging.CreateLogger<RefCacheBuilder>());
+        var priceTypeLoader = new PriceTypeLoader(session, Logging.CreateLogger<PriceTypeLoader>());
+        var priceLoader = new PriceLoader(session, resolver, Logging.CreateLogger<PriceLoader>());
+        var stockLoader = new StockLoader(session, resolver, Logging.CreateLogger<StockLoader>());
+        var lastMovementLoader = new LastMovementLoader(session, resolver, Logging.CreateLogger<LastMovementLoader>());
+        var priceCalculator = new PriceCalculator(Logging.CreateLogger<PriceCalculator>());
+        var stockBuilder = new StockBuilder(Logging.CreateLogger<StockBuilder>());
+        var registerReader = new RegisterDataReader(
+            priceTypeLoader,
+            refCacheBuilder,
+            priceLoader,
+            stockLoader,
+            lastMovementLoader,
+            priceCalculator,
+            stockBuilder,
+            Logging.CreateLogger<RegisterDataReader>());
+        var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>(), registerReader);
 
         var stopwatch = Stopwatch.StartNew();
         var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;

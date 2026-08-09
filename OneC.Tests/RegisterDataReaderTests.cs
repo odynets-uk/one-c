@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using OneC.Domain.Register;
 using OneC.Infrastructure.Com;
 using OneC.Infrastructure.Readers;
 using Xunit;
@@ -17,27 +18,43 @@ public class RegisterDataReaderTests
         // non-connected session is fine for these tests.
         var connector = new ComConnector(NullLogger<ComConnector>.Instance);
         var session = new ComSession(connector, NullLogger<ComSession>.Instance);
-        return new RegisterDataReader(session, NullLogger.Instance);
+        var resolver = new ReferenceResolver(session, NullLogger.Instance);
+        var refCacheBuilder = new RefCacheBuilder(session, NullLogger.Instance);
+        var priceTypeLoader = new PriceTypeLoader(session, NullLogger.Instance);
+        var priceLoader = new PriceLoader(session, resolver, NullLogger.Instance);
+        var stockLoader = new StockLoader(session, resolver, NullLogger.Instance);
+        var lastMovementLoader = new LastMovementLoader(session, resolver, NullLogger.Instance);
+        var priceCalculator = new PriceCalculator(NullLogger.Instance);
+        var stockBuilder = new StockBuilder(NullLogger.Instance);
+        return new RegisterDataReader(
+            priceTypeLoader,
+            refCacheBuilder,
+            priceLoader,
+            stockLoader,
+            lastMovementLoader,
+            priceCalculator,
+            stockBuilder,
+            NullLogger<RegisterDataReader>.Instance);
     }
 
-    private static RegisterDataReader.PriceTypeInfo PriceType(
+    private static PriceTypeInfo PriceType(
         string guid,
         string name,
         bool isCalculated = false,
         decimal markupPct = 0m)
     {
-        return new RegisterDataReader.PriceTypeInfo(guid, name, null, isCalculated, markupPct);
+        return new PriceTypeInfo(guid, name, null, isCalculated, markupPct);
     }
 
-    private static Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> PricesByItem(
+    private static Dictionary<string, Dictionary<string, PriceRow>> PricesByItem(
         string itemGuid,
         params (string TypeGuid, decimal Price, decimal MarkupPct, string Unit, string Period)[] rows)
     {
-        var result = new Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>>(StringComparer.OrdinalIgnoreCase);
-        var types = new Dictionary<string, (decimal, decimal, string, string)>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, Dictionary<string, PriceRow>>(StringComparer.OrdinalIgnoreCase);
+        var types = new Dictionary<string, PriceRow>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
-            types[row.TypeGuid] = (row.Price, row.MarkupPct, row.Unit, row.Period);
+            types[row.TypeGuid] = new PriceRow(row.Price, row.MarkupPct, row.Unit, row.Period);
         }
 
         result[itemGuid] = types;
@@ -48,7 +65,7 @@ public class RegisterDataReaderTests
     public void BuildPrices_ItemWithoutPrices_ReturnsEmpty()
     {
         var reader = CreateReader();
-        var priceTypes = new Dictionary<string, RegisterDataReader.PriceTypeInfo>(StringComparer.OrdinalIgnoreCase);
+        var priceTypes = new Dictionary<string, PriceTypeInfo>(StringComparer.OrdinalIgnoreCase);
         var prices = PricesByItem("other-item");
 
         var result = reader.BuildPrices("item-1", priceTypes, prices);
@@ -61,7 +78,7 @@ public class RegisterDataReaderTests
     {
         var reader = CreateReader();
         var costType = PriceType("guid-cost", "Цена закупочная");
-        var priceTypes = new Dictionary<string, RegisterDataReader.PriceTypeInfo>(StringComparer.OrdinalIgnoreCase)
+        var priceTypes = new Dictionary<string, PriceTypeInfo>(StringComparer.OrdinalIgnoreCase)
         {
             [costType.Guid] = costType,
         };
@@ -85,7 +102,7 @@ public class RegisterDataReaderTests
         var reader = CreateReader();
         var costType = PriceType("guid-cost", "Цена закупочная");
         var retailType = PriceType("guid-retail", "Розничная", isCalculated: true, markupPct: 30m);
-        var priceTypes = new Dictionary<string, RegisterDataReader.PriceTypeInfo>(StringComparer.OrdinalIgnoreCase)
+        var priceTypes = new Dictionary<string, PriceTypeInfo>(StringComparer.OrdinalIgnoreCase)
         {
             [costType.Guid] = costType,
             [retailType.Guid] = retailType,
@@ -113,7 +130,7 @@ public class RegisterDataReaderTests
     {
         var reader = CreateReader();
         var retailType = PriceType("guid-retail", "Розничная", isCalculated: true, markupPct: 30m);
-        var priceTypes = new Dictionary<string, RegisterDataReader.PriceTypeInfo>(StringComparer.OrdinalIgnoreCase)
+        var priceTypes = new Dictionary<string, PriceTypeInfo>(StringComparer.OrdinalIgnoreCase)
         {
             [retailType.Guid] = retailType,
         };
@@ -131,12 +148,12 @@ public class RegisterDataReaderTests
     public void BuildStock_ItemWithRows_ReturnsEntriesWithLastMovement()
     {
         var reader = CreateReader();
-        var stockByItem = new Dictionary<string, List<RegisterDataReader.StockRow>>(StringComparer.OrdinalIgnoreCase)
+        var stockByItem = new Dictionary<string, List<StockRow>>(StringComparer.OrdinalIgnoreCase)
         {
             ["item-1"] = new()
             {
-                new RegisterDataReader.StockRow("wh-1", "Склад 1", 10m),
-                new RegisterDataReader.StockRow("wh-2", "Склад 2", 5m),
+                new StockRow("wh-1", "Склад 1", 10m),
+                new StockRow("wh-2", "Склад 2", 5m),
             },
         };
         var lastMovements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -165,7 +182,7 @@ public class RegisterDataReaderTests
     public void BuildStock_ItemWithoutRows_ReturnsEmpty()
     {
         var reader = CreateReader();
-        var stockByItem = new Dictionary<string, List<RegisterDataReader.StockRow>>(StringComparer.OrdinalIgnoreCase);
+        var stockByItem = new Dictionary<string, List<StockRow>>(StringComparer.OrdinalIgnoreCase);
         var lastMovements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         var result = reader.BuildStock("item-1", stockByItem, lastMovements);

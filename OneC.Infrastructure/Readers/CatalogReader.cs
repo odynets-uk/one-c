@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using OneC.Application.Abstractions;
 using OneC.Domain.Profiles;
 using OneC.Domain.ValueObjects;
+using OneC.Domain.Register;
 using OneC.Infrastructure.Com;
 
 namespace OneC.Infrastructure.Readers;
@@ -14,10 +16,10 @@ namespace OneC.Infrastructure.Readers;
 /// </summary>
 public sealed class CatalogReader
 {
-    private readonly ComSession _session;
+    private readonly IComSession _session;
     private readonly ComValueMapper _mapper;
     private readonly ILogger<CatalogReader> _logger;
-    private readonly RegisterDataReader _registerReader;
+    private readonly IRegisterDataReader _registerReader;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="CatalogReader" /> class.
@@ -25,12 +27,13 @@ public sealed class CatalogReader
     /// <param name="session">An established COM session.</param>
     /// <param name="mapper">Value mapper.</param>
     /// <param name="logger">Logger instance.</param>
-    public CatalogReader(ComSession session, ComValueMapper mapper, ILogger<CatalogReader> logger)
+    /// <param name="registerReader">Register data reader.</param>
+    public CatalogReader(IComSession session, ComValueMapper mapper, ILogger<CatalogReader> logger, IRegisterDataReader registerReader)
     {
         _session = session;
         _mapper = mapper;
         _logger = logger;
-        _registerReader = new RegisterDataReader(session, logger);
+        _registerReader = registerReader;
     }
 
     /// <summary>
@@ -111,9 +114,9 @@ public sealed class CatalogReader
             // 4b. Load price/stock data from registers. The registers are filtered
             //     by a 1C array of references (В (&ItemsArray)) for the collected
             //     item GUIDs — avoids loading the entire register.
-            IReadOnlyDictionary<string, RegisterDataReader.PriceTypeInfo>? priceTypesByGuid = null;
-            Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>>? pricesByItem = null;
-            Dictionary<string, List<RegisterDataReader.StockRow>>? stockByItem = null;
+            IReadOnlyDictionary<string, PriceTypeInfo>? priceTypesByGuid = null;
+            Dictionary<string, Dictionary<string, PriceRow>>? pricesByItem = null;
+            Dictionary<string, List<StockRow>>? stockByItem = null;
             Dictionary<string, string>? lastMovements = null;
 
             if (readPrices || readStock)
@@ -125,32 +128,32 @@ public sealed class CatalogReader
                 refCacheSw.Stop();
                 _logger.LogInformation("Stage ref-cache done in {ElapsedMs} ms.", refCacheSw.ElapsedMilliseconds);
 
-                if (readPrices)
-                {
-                    var priceTypesSw = Stopwatch.StartNew();
-                    var priceTypes = _registerReader.LoadPriceTypes();
-                    priceTypesByGuid = priceTypes.ToDictionary(t => t.Guid, StringComparer.OrdinalIgnoreCase);
-                    priceTypesSw.Stop();
-                    _logger.LogInformation("Stage price-types done in {ElapsedMs} ms.", priceTypesSw.ElapsedMilliseconds);
+            if (readPrices)
+            {
+                var priceTypesSw = Stopwatch.StartNew();
+                var priceTypes = _registerReader.LoadPriceTypes();
+                priceTypesByGuid = priceTypes.ToDictionary(t => t.Guid, StringComparer.OrdinalIgnoreCase);
+                priceTypesSw.Stop();
+                _logger.LogInformation("Stage price-types done in {ElapsedMs} ms.", priceTypesSw.ElapsedMilliseconds);
 
-                    var pricesSw = Stopwatch.StartNew();
-                    pricesByItem = _registerReader.LoadPrices(itemGuids, refCache);
-                    pricesSw.Stop();
-                    _logger.LogInformation("Stage prices done in {ElapsedMs} ms.", pricesSw.ElapsedMilliseconds);
-                }
+                var pricesSw = Stopwatch.StartNew();
+                pricesByItem = _registerReader.LoadPrices(itemGuids, refCache);
+                pricesSw.Stop();
+                _logger.LogInformation("Stage prices done in {ElapsedMs} ms.", pricesSw.ElapsedMilliseconds);
+            }
 
-                if (readStock)
-                {
-                    var stockSw = Stopwatch.StartNew();
-                    stockByItem = _registerReader.LoadStock(itemGuids, refCache);
-                    stockSw.Stop();
-                    _logger.LogInformation("Stage stock done in {ElapsedMs} ms.", stockSw.ElapsedMilliseconds);
+            if (readStock)
+            {
+                var stockSw = Stopwatch.StartNew();
+                stockByItem = _registerReader.LoadStock(itemGuids, refCache);
+                stockSw.Stop();
+                _logger.LogInformation("Stage stock done in {ElapsedMs} ms.", stockSw.ElapsedMilliseconds);
 
-                    var lastMovSw = Stopwatch.StartNew();
-                    lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache);
-                    lastMovSw.Stop();
-                    _logger.LogInformation("Stage last-movements done in {ElapsedMs} ms.", lastMovSw.ElapsedMilliseconds);
-                }
+                var lastMovSw = Stopwatch.StartNew();
+                lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache);
+                lastMovSw.Stop();
+                _logger.LogInformation("Stage last-movements done in {ElapsedMs} ms.", lastMovSw.ElapsedMilliseconds);
+            }
             }
 
             // 5. Attach prices/stock to the records (if requested).
