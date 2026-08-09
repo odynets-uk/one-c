@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using OneC.Domain.ValueObjects;
 using OneC.Infrastructure.Com;
 
 namespace OneC.Infrastructure.Readers;
@@ -126,12 +127,25 @@ public sealed class RegisterDataReader
     ///     The refs are created once and reused by LoadPrices/LoadStock/LoadLastMovements
     ///     — avoids building identical reference arrays three times.
     /// </summary>
-    public IReadOnlyDictionary<string, object> BuildRefCache(
+    /// <summary>
+    ///     Cache of GUID -> COM reference, plus a reverse map IUnknown pointer -> GUID.
+    ///     The reverse map lets us resolve item/price-type refs returned by queries
+    ///     in O(1) WITHOUT a COM round-trip (УникальныйИдентификатор call per row),
+    ///     which was the main bottleneck on the full base (~40k COM calls = ~250s).
+    /// </summary>
+    public sealed class RefCache
+    {
+        public required IReadOnlyDictionary<string, object> ByGuid { get; init; }
+        public required Dictionary<IntPtr, string> ByIUnknown { get; init; }
+    }
+
+    public RefCache BuildRefCache(
         IReadOnlyCollection<string> itemGuids,
         string catalogName)
     {
         var sw = Stopwatch.StartNew();
-        var cache = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var byGuid = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var byIUnknown = new Dictionary<IntPtr, string>();
 
         dynamic catalogs = _session.Connection.Catalogs;
         var catalogsType = ((object)catalogs).GetType();
@@ -145,23 +159,33 @@ public sealed class RegisterDataReader
         foreach (var guid in itemGuids)
         {
             dynamic v8Guid = _session.Connection.NewObject("УникальныйИдентификатор", guid);
-            cache[guid] = (object)catalog.GetRef(v8Guid);
+            dynamic refObj = catalog.GetRef(v8Guid);
+            byGuid[guid] = (object)refObj;
+
+            // The same reference returned from queries should expose the same IUnknown,
+            // letting us resolve the GUID from a returned COM ref without a round-trip.
+            var iUnknown = Marshal.GetIUnknownForObject(refObj);
+            byIUnknown[iUnknown] = guid;
+            Marshal.Release(iUnknown);
         }
 
-        _logger.LogInformation("Built {Count} reference cache entries in {ElapsedMs} ms.", cache.Count, sw.ElapsedMilliseconds);
-        return cache;
+        _logger.LogInformation("Built {Count} reference cache entries in {ElapsedMs} ms.", byGuid.Count, sw.ElapsedMilliseconds);
+        return new RefCache { ByGuid = byGuid, ByIUnknown = byIUnknown };
     }
 
     /// <summary>
     ///     The raw register query (full price history). Used as a fallback if
     ///     СрезПоследних (latest slice) throws a non-fatal COM exception.
+    ///     GUIDs are resolved directly in the query via УникальныйИдентификатор()
+    ///     — no COM round-trip per row.
     /// </summary>
     private const string RawPricesQuery = """
                                           SELECT
-                                              Цены.Номенклатура AS Item,
-                                              Цены.ТипЦен AS PriceType,
+                                              Цены.Номенклатура.УникальныйИдентификатор() AS ItemGuid,
+                                              Цены.ТипЦен.УникальныйИдентификатор() AS TypeGuid,
                                               Цены.Цена AS Price,
                                               Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                                              Цены.ЕдиницаИзмерения.УникальныйИдентификатор() AS UnitGuid,
                                               Цены.ЕдиницаИзмерения AS Unit,
                                               Цены.Период AS Period
                                           FROM
@@ -172,7 +196,7 @@ public sealed class RegisterDataReader
 
     public Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
-        IReadOnlyDictionary<string, object> refCache)
+        RefCache refCache)
     {
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>>(StringComparer.OrdinalIgnoreCase);
@@ -186,10 +210,10 @@ public sealed class RegisterDataReader
             // slower — 946s out of the 1002s total on the full base).
             // The condition parameter after the comma is the standard 1C syntax for
             // omitting the period. Falls back to the raw register if it throws.
-            if (!TryLoadPriceSlice(v8Array, result))
+            if (!TryLoadPriceSlice(v8Array, refCache, result))
             {
                 _logger.LogWarning("СрезПоследних failed, falling back to raw price register.");
-                LoadPricesRaw(v8Array, result);
+                LoadPricesRaw(v8Array, refCache, result);
             }
         }
 
@@ -203,6 +227,7 @@ public sealed class RegisterDataReader
     /// </summary>
     private bool TryLoadPriceSlice(
         dynamic v8Array,
+        RefCache refCache,
         Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
     {
         try
@@ -210,10 +235,11 @@ public sealed class RegisterDataReader
             dynamic query = _session.Connection.NewObject("Query");
             query.Text = """
                          SELECT
-                             Цены.Номенклатура AS Item,
-                             Цены.ТипЦен AS PriceType,
+                             Цены.Номенклатура.УникальныйИдентификатор() AS ItemGuid,
+                             Цены.ТипЦен.УникальныйИдентификатор() AS TypeGuid,
                              Цены.Цена AS Price,
                              Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                             Цены.ЕдиницаИзмерения.УникальныйИдентификатор() AS UnitGuid,
                              Цены.ЕдиницаИзмерения AS Unit,
                              Цены.Период AS Period
                          FROM
@@ -222,7 +248,7 @@ public sealed class RegisterDataReader
             query.SetParameter("ItemsArray", v8Array);
 
             dynamic table = query.Execute().Unload();
-            ProcessPriceTable(table, result);
+            ProcessPriceTable(table, refCache, result);
             return true;
         }
         catch (COMException ex)
@@ -237,6 +263,7 @@ public sealed class RegisterDataReader
     /// </summary>
     private void LoadPricesRaw(
         dynamic v8Array,
+        RefCache refCache,
         Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
     {
         dynamic query = _session.Connection.NewObject("Query");
@@ -244,32 +271,37 @@ public sealed class RegisterDataReader
         query.SetParameter("ItemsArray", v8Array);
 
         dynamic table = query.Execute().Unload();
-        ProcessPriceTable(table, result);
+        ProcessPriceTable(table, refCache, result);
     }
 
     /// <summary>
     ///     Reads the price result table into the result dictionary,
-    ///     keeping the latest record per (item, type).
+    ///     keeping the latest record per (item, type). Resolves item/price-type
+    ///     GUIDs via the reverse IUnknown map — no COM round-trip per row.
     /// </summary>
     private void ProcessPriceTable(
         dynamic table,
+        RefCache refCache,
         Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
     {
         int rowCount = table.Count();
         for (var i = 0; i < rowCount; i++)
         {
             dynamic row = table.Get(i);
-            var itemGuid = GetRefGuid(row.Item);
-            var typeGuid = GetRefGuid(row.PriceType);
+
+            // GUIDs come pre-resolved from the query (УникальныйИдентификатор()).
+            // OneCRef.FromString normalizes: empty ref (all-zero GUID) → null.
+            var itemGuid = OneCRef.FromString(row.ItemGuid?.ToString())?.ToString();
+            var typeGuid = OneCRef.FromString(row.TypeGuid?.ToString())?.ToString();
             if (itemGuid is null || typeGuid is null)
             {
                 continue;
             }
 
-            // Explicitly typed variables: row.X is dynamic, so ToDecimal/GetRefName
+            // Explicitly typed variables: row.X is dynamic, so ToDecimal
             // results would otherwise be typed dynamic → tuple literal becomes
             // ValueTuple<object,...> which cannot be stored in ValueTuple<decimal,decimal,string,string>.
-            string unit = GetRefName(row.Unit);
+            string unit = row.UnitGuid?.ToString() ?? GetRefName(row.Unit);
             decimal price = ToDecimal(row.Price);
             decimal markupPct = ToDecimal(row.MarkupPct);
             string period = FormatDateTime(row.Period);
@@ -297,7 +329,7 @@ public sealed class RegisterDataReader
     /// </summary>
     public Dictionary<string, List<StockRow>> LoadStock(
         IReadOnlyCollection<string> itemGuids,
-        IReadOnlyDictionary<string, object> refCache)
+        RefCache refCache)
     {
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, List<StockRow>>(StringComparer.OrdinalIgnoreCase);
@@ -352,7 +384,7 @@ public sealed class RegisterDataReader
     /// </summary>
     public Dictionary<string, string> LoadLastMovements(
         IReadOnlyCollection<string> itemGuids,
-        IReadOnlyDictionary<string, object> refCache)
+        RefCache refCache)
     {
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -509,12 +541,12 @@ public sealed class RegisterDataReader
     ///     Creates a 1C Массив of catalog references for the given GUID batch,
     ///     reusing the already-built reference cache.
     /// </summary>
-    private dynamic CreateRefArray(IEnumerable<string> guids, IReadOnlyDictionary<string, object> refCache)
+    private dynamic CreateRefArray(IEnumerable<string> guids, RefCache refCache)
     {
         dynamic v8Array = _session.Connection.NewObject("Массив");
         foreach (var guid in guids)
         {
-            v8Array.Add(refCache[guid]);
+            v8Array.Add(refCache.ByGuid[guid]);
         }
 
         return v8Array;
