@@ -71,11 +71,22 @@ public sealed class CatalogReader
             dynamic queryResult = query.Execute();
             dynamic selection = queryResult.Choose();
 
-            // 4. Iterate (Latin method) — collect all records first.
+            // 4. Iterate (Latin method) — collect all records and their GUIDs first.
             var count = 0;
+            var itemGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             while (selection.Next())
             {
                 var record = MapRecord(selection, profile, catalogName, categoryIdSet);
+
+                if (readPrices || readStock)
+                {
+                    var itemGuid = record.TryGetValue("id", out object? idVal) ? idVal?.ToString() : null;
+                    if (itemGuid is not null)
+                    {
+                        itemGuids.Add(itemGuid);
+                    }
+                }
+
                 records.Add(record);
                 count++;
 
@@ -87,24 +98,31 @@ public sealed class CatalogReader
             }
 
             // 4b. Load price/stock data from registers. The registers are filtered
-            //     by the same catalog WHERE clause via a subquery, so only rows for
-            //     the extracted items are loaded (not the whole register).
+            //     by a 1C array of references (В (&ItemsArray)) for the collected
+            //     item GUIDs — avoids loading the entire register.
             IReadOnlyDictionary<string, RegisterDataReader.PriceTypeInfo>? priceTypesByGuid = null;
             Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>>? pricesByItem = null;
             Dictionary<string, List<RegisterDataReader.StockRow>>? stockByItem = null;
             Dictionary<string, string>? lastMovements = null;
 
-            if (readPrices)
+            if (readPrices || readStock)
             {
-                var priceTypes = _registerReader.LoadPriceTypes();
-                priceTypesByGuid = priceTypes.ToDictionary(t => t.Guid, StringComparer.OrdinalIgnoreCase);
-                pricesByItem = _registerReader.LoadPrices(catalogName, whereClause);
-            }
+                // Build the GUID -> COM reference cache ONCE and reuse it
+                // across LoadPrices/LoadStock/LoadLastMovements.
+                var refCache = _registerReader.BuildRefCache(itemGuids, catalogName);
 
-            if (readStock)
-            {
-                stockByItem = _registerReader.LoadStock(catalogName, whereClause);
-                lastMovements = _registerReader.LoadLastMovements(catalogName, whereClause);
+                if (readPrices)
+                {
+                    var priceTypes = _registerReader.LoadPriceTypes();
+                    priceTypesByGuid = priceTypes.ToDictionary(t => t.Guid, StringComparer.OrdinalIgnoreCase);
+                    pricesByItem = _registerReader.LoadPrices(itemGuids, refCache);
+                }
+
+                if (readStock)
+                {
+                    stockByItem = _registerReader.LoadStock(itemGuids, refCache);
+                    lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache);
+                }
             }
 
             // 5. Attach prices/stock to the records (if requested).
@@ -376,22 +394,16 @@ public sealed class CatalogReader
 
     private static object? GetProperty(dynamic obj, string propertyName)
     {
-        // Try dynamic access first (works for Latin aliases like __Ref).
-        try
-        {
-            return obj.Get(propertyName);
-        }
-        catch (Exception)
-        {
-            // Fallback to InvokeMember for Cyrillic field names.
-            var type = ((object)obj).GetType();
-            return type.InvokeMember(
-                propertyName,
-                BindingFlags.GetField | BindingFlags.GetProperty,
-                null,
-                obj,
-                null);
-        }
+        // InvokeMember works for both Latin and Cyrillic field names.
+        // Do NOT call obj.Get(propertyName) first — for Cyrillic fields it always
+        // throws a (very expensive) COM-interop exception before falling back here.
+        var type = ((object)obj).GetType();
+        return type.InvokeMember(
+            propertyName,
+            BindingFlags.GetField | BindingFlags.GetProperty,
+            null,
+            obj,
+            null);
     }
 
     /// <summary>
