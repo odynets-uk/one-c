@@ -24,7 +24,7 @@
 - [x] `OneC.Infrastructure/Profiles/ProfileLoader.cs` — розширена валідація JSON-профілів (в коді, без JSON Schema)
 - [x] `OneC.Cli` команда `get-catalog <name> --profile <profile> [--mode full|incremental] [--batch-size N]`
   - Для каталогу за замовчуванням: `--mode full --batch-size -1` (всі дані)
-- [ ] Профілювання розміру батча (100/500/1000) — вимірювання часу/пам'яті
+- [x] Профілювання розміру батча (100/500/1000) — вимірювання часу/пам'яті (Stopwatch + CPU + RAM у GetCatalogService)
 
 ## Критерії готовності
 
@@ -133,3 +133,4 @@ return type.InvokeMember(propertyName, BindingFlags.GetProperty, null, obj, null
 | 2026-08-09 | Виправлено parent_id для топових елементів: порожнє посилання 1С (нульовий GUID 00000000-0000-0000-0000-000000000000) → null через NormalizeGuid у GetRefId | in-progress |
 | 2026-08-09 | Рефакторинг GUID-логіки у Value Object OneCRef (OneC.Domain/ValueObjects): парсинг, нормалізація порожнього посилання, валідація (InvalidOperationException). CatalogReader.GetRefId використовує OneCRef. Додано OneCRefTests + entity-design-onecref.md (41 тест проходять) | in-progress |
 | 2026-08-09 | Розширено формат профілю для products: validation.vo (OneCRef), validation.exists (runtime), validation.empty_to_null; filters.price_types/warehouses/changed_since (відносний/абсолютний); skip_items_without_prices/stock. CatalogReader: field_filters IN/LIKE, exists-перевірка. GetCatalogService: профілювання час/CPU/RAM. Створено profiles/products.json, уніфіковано categories.json. 57 тестів проходять | in-progress |
+| 2026-08-09 | Виправлено exists-валідацію: LoadCategoryGuids витягує всі GUID категорій (IsFolder=true) з 1С перед витягом товарів; MapRecord не додає id товарів у множину категорій | in-progress |
