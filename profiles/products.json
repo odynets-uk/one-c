@@ -9,7 +9,7 @@
   "skip_items_without_prices": false,
   "skip_items_without_stock": false,
   "output": {
-    "json": { "file_path": "export/products.json", "pretty": true },
+    "json": { "file_path": "export/products-<mode>-<batch-size>-<timestamp>.json", "pretty": true },
     "db": { "file_path": "export/kplus.db", "engine": "sqlite", "version": "3.37+" }
   },
   "table": "products",

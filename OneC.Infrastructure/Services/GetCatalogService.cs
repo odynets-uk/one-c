@@ -70,7 +70,7 @@ public sealed class GetCatalogService : IGetCatalogService
 
         var records = reader.Read(profile, batchSize);
 
-        WriteJsonOutput(profile, records);
+        WriteJsonOutput(profile, records, batchSize);
 
         stopwatch.Stop();
         var cpuAfter = Process.GetCurrentProcess().TotalProcessorTime;
@@ -87,7 +87,10 @@ public sealed class GetCatalogService : IGetCatalogService
         return Task.FromResult(records.Count);
     }
 
-    private void WriteJsonOutput(ExtractionProfile profile, IReadOnlyList<Dictionary<string, object?>> records)
+    private void WriteJsonOutput(
+        ExtractionProfile profile,
+        IReadOnlyList<Dictionary<string, object?>> records,
+        int batchSize)
     {
         var filePath = profile.Output?.Json?.FilePath ?? profile.Output?.FilePath;
         if (string.IsNullOrWhiteSpace(filePath))
@@ -95,7 +98,7 @@ public sealed class GetCatalogService : IGetCatalogService
             return;
         }
 
-        filePath = ExpandDatePlaceholder(filePath);
+        filePath = ExpandPlaceholders(filePath, profile.Mode, batchSize);
 
         var directory = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(directory))
@@ -119,9 +122,14 @@ public sealed class GetCatalogService : IGetCatalogService
         _logger.LogInformation("Written {Count} records to {FilePath}.", records.Count, filePath);
     }
 
-    private static string ExpandDatePlaceholder(string path)
+    private static string ExpandPlaceholders(string path, string mode, int batchSize)
     {
-        return path.Replace("{date}", DateTime.Now.ToString("yyyy-MM-dd"), StringComparison.Ordinal);
+        var now = DateTime.Now;
+        return path
+            .Replace("{date}", now.ToString("yyyy-MM-dd"), StringComparison.Ordinal)
+            .Replace("{mode}", mode, StringComparison.Ordinal)
+            .Replace("{batch-size}", batchSize.ToString(), StringComparison.Ordinal)
+            .Replace("{timestamp}", now.ToString("yyyyMMdd-HHmmss"), StringComparison.Ordinal);
     }
 
     private static string DecryptPassword(string connectionString)
