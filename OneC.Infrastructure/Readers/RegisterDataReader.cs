@@ -150,12 +150,23 @@ public sealed class RegisterDataReader
     }
 
     /// <summary>
-    ///     Loads the latest known value of each (item, price_type) pair from the
-    ///     prices register. Mirrors export1.py read_prices().
-    ///     Filters the register by a 1C array of references (В (&ItemsArray)) —
-    ///     avoids loading the entire register history.
-    ///     Returns: itemGuid -> { typeGuid -> (Цена, ПроцентСкидкиНаценки, unit, period) }.
+    ///     The raw register query (full price history). Used as a fallback if
+    ///     СрезПоследних (latest slice) throws a non-fatal COM exception.
     /// </summary>
+    private const string RawPricesQuery = """
+                                          SELECT
+                                              Цены.Номенклатура AS Item,
+                                              Цены.ТипЦен AS PriceType,
+                                              Цены.Цена AS Price,
+                                              Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                                              Цены.ЕдиницаИзмерения AS Unit,
+                                              Цены.Период AS Period
+                                          FROM
+                                              РегистрСведений.ЦеныНоменклатуры AS Цены
+                                          WHERE
+                                              Цены.Номенклатура В (&ItemsArray)
+                                          """;
+
     public Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
         IReadOnlyDictionary<string, object> refCache)
@@ -164,6 +175,34 @@ public sealed class RegisterDataReader
         var result = new Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var batch in itemGuids.Chunk(RefBatchSize))
+        {
+            dynamic v8Array = CreateRefArray(batch, refCache);
+
+            // Try СрезПоследних (latest price slice) first — reads only the latest
+            // price per (item, type) instead of the entire history (which is ~100x
+            // slower — 946s out of the 1002s total on the full base).
+            // The condition parameter after the comma is the standard 1C syntax for
+            // omitting the period. Falls back to the raw register if it throws.
+            if (!TryLoadPriceSlice(v8Array, result))
+            {
+                _logger.LogWarning("СрезПоследних failed, falling back to raw price register.");
+                LoadPricesRaw(v8Array, result);
+            }
+        }
+
+        _logger.LogInformation("Loaded prices for {Count} items in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
+        return result;
+    }
+
+    /// <summary>
+    ///     Attempts to load the latest price slice via СрезПоследних.
+    ///     Returns false (without rethrowing) if the query throws a COMException.
+    /// </summary>
+    private bool TryLoadPriceSlice(
+        dynamic v8Array,
+        Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
+    {
+        try
         {
             dynamic query = _session.Connection.NewObject("Query");
             query.Text = """
@@ -175,51 +214,77 @@ public sealed class RegisterDataReader
                              Цены.ЕдиницаИзмерения AS Unit,
                              Цены.Период AS Period
                          FROM
-                             РегистрСведений.ЦеныНоменклатуры AS Цены
-                         WHERE
-                             Цены.Номенклатура В (&ItemsArray)
+                             РегистрСведений.ЦеныНоменклатуры.СрезПоследних(, Номенклатура В (&ItemsArray)) AS Цены
                          """;
-
-            query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+            query.SetParameter("ItemsArray", v8Array);
 
             dynamic table = query.Execute().Unload();
-            int rowCount = table.Count();
-            for (var i = 0; i < rowCount; i++)
+            ProcessPriceTable(table, result);
+            return true;
+        }
+        catch (COMException ex)
+        {
+            _logger.LogWarning("СрезПоследних COMException ({HResult}): {Message}", ex.HResult, ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Loads prices from the raw register (full history) and keeps the latest per (item, type).
+    /// </summary>
+    private void LoadPricesRaw(
+        dynamic v8Array,
+        Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
+    {
+        dynamic query = _session.Connection.NewObject("Query");
+        query.Text = RawPricesQuery;
+        query.SetParameter("ItemsArray", v8Array);
+
+        dynamic table = query.Execute().Unload();
+        ProcessPriceTable(table, result);
+    }
+
+    /// <summary>
+    ///     Reads the price result table into the result dictionary,
+    ///     keeping the latest record per (item, type).
+    /// </summary>
+    private void ProcessPriceTable(
+        dynamic table,
+        Dictionary<string, Dictionary<string, (decimal, decimal, string, string)>> result)
+    {
+        int rowCount = table.Count();
+        for (var i = 0; i < rowCount; i++)
+        {
+            dynamic row = table.Get(i);
+            var itemGuid = GetRefGuid(row.Item);
+            var typeGuid = GetRefGuid(row.PriceType);
+            if (itemGuid is null || typeGuid is null)
             {
-                dynamic row = table.Get(i);
-                var itemGuid = GetRefGuid(row.Item);
-                var typeGuid = GetRefGuid(row.PriceType);
-                if (itemGuid is null || typeGuid is null)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                // Explicitly typed variables: row.X is dynamic, so ToDecimal/GetRefName
-                // results would otherwise be typed dynamic → tuple literal becomes
-                // ValueTuple<object,...> which cannot be stored in ValueTuple<decimal,decimal,string,string>.
-                string unit = GetRefName(row.Unit);
-                decimal price = ToDecimal(row.Price);
-                decimal markupPct = ToDecimal(row.MarkupPct);
-                string period = FormatDateTime(row.Period);
-                var entry = new ValueTuple<decimal, decimal, string, string>(price, markupPct, unit, period);
+            // Explicitly typed variables: row.X is dynamic, so ToDecimal/GetRefName
+            // results would otherwise be typed dynamic → tuple literal becomes
+            // ValueTuple<object,...> which cannot be stored in ValueTuple<decimal,decimal,string,string>.
+            string unit = GetRefName(row.Unit);
+            decimal price = ToDecimal(row.Price);
+            decimal markupPct = ToDecimal(row.MarkupPct);
+            string period = FormatDateTime(row.Period);
+            var entry = new ValueTuple<decimal, decimal, string, string>(price, markupPct, unit, period);
 
-                if (!result.TryGetValue(itemGuid, out Dictionary<string, (decimal, decimal, string, string)>? types))
-                {
-                    types = new Dictionary<string, (decimal, decimal, string, string)>(StringComparer.OrdinalIgnoreCase);
-                    result[itemGuid] = types;
-                }
+            if (!result.TryGetValue(itemGuid, out Dictionary<string, (decimal, decimal, string, string)>? types))
+            {
+                types = new Dictionary<string, (decimal, decimal, string, string)>(StringComparer.OrdinalIgnoreCase);
+                result[itemGuid] = types;
+            }
 
-                // Keep the latest record for this (item, type).
-                if (!types!.TryGetValue(typeGuid, out (decimal, decimal, string, string) existing)
-                    || string.CompareOrdinal(entry.Item4, existing.Item4) > 0)
-                {
-                    types[typeGuid] = entry;
-                }
+            // Keep the latest record for this (item, type).
+            if (!types!.TryGetValue(typeGuid, out (decimal, decimal, string, string) existing)
+                || string.CompareOrdinal(entry.Item4, existing.Item4) > 0)
+            {
+                types[typeGuid] = entry;
             }
         }
-
-        _logger.LogInformation("Loaded prices for {Count} items in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
-        return result;
     }
 
     /// <summary>
