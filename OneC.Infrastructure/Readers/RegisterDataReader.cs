@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using OneC.Domain.ValueObjects;
@@ -20,12 +21,18 @@ namespace OneC.Infrastructure.Readers;
 public sealed class RegisterDataReader
 {
     // Batch size for the 1C array of references (В (&ItemsArray)).
-    // Larger batches = fewer register passes (each batch scans the register history).
-    // 500 -> 30 passes for 15k items; 2000 -> 8 passes (~3.75x faster).
-    private const int RefBatchSize = 2000;
+    // Larger batches = fewer register passes. 50_000 covers the full catalog
+    // in a single pass, avoiding repeated scans of the price register.
+    private const int RefBatchSize = 50000;
 
     private readonly ComSession _session;
     private readonly ILogger _logger;
+
+    // Cache COM ref object -> GUID string. Resolves each unique reference once,
+    // avoiding repeated (very expensive) УникальныйИдентификатор COM round-trips
+    // for the same item/price-type appearing in many rows or across batches.
+    private readonly ConditionalWeakTable<object, string?> _guidCache = new();
+    private readonly ConditionalWeakTable<object, string> _nameCache = new();
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="RegisterDataReader" /> class.
@@ -136,7 +143,6 @@ public sealed class RegisterDataReader
     public sealed class RefCache
     {
         public required IReadOnlyDictionary<string, object> ByGuid { get; init; }
-        public required Dictionary<IntPtr, string> ByIUnknown { get; init; }
     }
 
     public RefCache BuildRefCache(
@@ -145,7 +151,6 @@ public sealed class RegisterDataReader
     {
         var sw = Stopwatch.StartNew();
         var byGuid = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        var byIUnknown = new Dictionary<IntPtr, string>();
 
         dynamic catalogs = _session.Connection.Catalogs;
         var catalogsType = ((object)catalogs).GetType();
@@ -161,16 +166,10 @@ public sealed class RegisterDataReader
             dynamic v8Guid = _session.Connection.NewObject("УникальныйИдентификатор", guid);
             dynamic refObj = catalog.GetRef(v8Guid);
             byGuid[guid] = (object)refObj;
-
-            // The same reference returned from queries should expose the same IUnknown,
-            // letting us resolve the GUID from a returned COM ref without a round-trip.
-            var iUnknown = Marshal.GetIUnknownForObject(refObj);
-            byIUnknown[iUnknown] = guid;
-            Marshal.Release(iUnknown);
         }
 
         _logger.LogInformation("Built {Count} reference cache entries in {ElapsedMs} ms.", byGuid.Count, sw.ElapsedMilliseconds);
-        return new RefCache { ByGuid = byGuid, ByIUnknown = byIUnknown };
+        return new RefCache { ByGuid = byGuid };
     }
 
     /// <summary>
@@ -557,27 +556,18 @@ public sealed class RegisterDataReader
             return null;
         }
 
-        // Fast path: resolve the GUID via the reverse IUnknown map (no COM round-trip).
-        // Marshal.GetIUnknownForObject returns the pointer of the underlying COM object
-        // itself (not the RCW), so all RCW wrappers for the same reference hit the same key.
-        if (refCache is not null)
+        // Cache per RCW object. The Com interop layer reuses the same RCW
+        // for the same underlying COM object when the same row/ValueTable value
+        // is accessed repeatedly, so each unique reference resolves its GUID
+        // exactly once — saving repeated, expensive УникальныйИдентификатор calls.
+        if (_guidCache.TryGetValue(refObject, out var cached))
         {
-            var iUnknown = Marshal.GetIUnknownForObject(refObject);
-            try
-            {
-                if (refCache.ByIUnknown.TryGetValue(iUnknown, out var cachedGuid))
-                {
-                    return cachedGuid;
-                }
-            }
-            finally
-            {
-                Marshal.Release(iUnknown);
-            }
+            return cached;
         }
 
-        // Fallback: extract the GUID via УникальныйИдентификатор (like CatalogReader.GetRefId).
+        // Extract the GUID via УникальныйИдентификатор (like CatalogReader.GetRefId).
         // String(ref) in 1C returns the display name, not the GUID.
+        string? result = null;
         try
         {
             var type = refObject.GetType();
@@ -589,7 +579,7 @@ public sealed class RegisterDataReader
                 null);
             if (guid is not null)
             {
-                return _session.String(guid);
+                result = _session.String(guid);
             }
         }
         catch (Exception ex)
@@ -597,7 +587,8 @@ public sealed class RegisterDataReader
             _logger.LogDebug("УникальныйИдентификатор failed: {Message}", ex.Message);
         }
 
-        return null;
+        _guidCache.Add(refObject, result);
+        return result;
     }
 
     private string GetRefName(object? refObject)
@@ -612,16 +603,24 @@ public sealed class RegisterDataReader
             return refObject.ToString() ?? string.Empty;
         }
 
+        if (_nameCache.TryGetValue(refObject, out var cached))
+        {
+            return cached;
+        }
+
+        string name;
         try
         {
             var type = refObject.GetType();
-            var name = type.InvokeMember("Description", BindingFlags.GetProperty, null, refObject, null);
-            return name?.ToString() ?? string.Empty;
+            name = type.InvokeMember("Description", BindingFlags.GetProperty, null, refObject, null)?.ToString() ?? string.Empty;
         }
         catch (Exception)
         {
-            return string.Empty;
+            name = string.Empty;
         }
+
+        _nameCache.Add(refObject, name);
+        return name;
     }
 
     private static decimal ToDecimal(object? value)
