@@ -16,6 +16,7 @@ public sealed class CatalogReader
     private readonly ComSession _session;
     private readonly ComValueMapper _mapper;
     private readonly ILogger<CatalogReader> _logger;
+    private readonly RegisterDataReader _registerReader;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="CatalogReader" /> class.
@@ -28,6 +29,7 @@ public sealed class CatalogReader
         _session = session;
         _mapper = mapper;
         _logger = logger;
+        _registerReader = new RegisterDataReader(session, logger);
     }
 
     /// <summary>
@@ -43,12 +45,34 @@ public sealed class CatalogReader
         var tableName = profile.Table ?? InferTableName(profile);
         var records = new List<Dictionary<string, object?>>();
 
+        // Whether to read prices/stock from registers.
+        var readPrices = profile.Filters?.Prices is not null;
+        var readStock = profile.Filters?.Stock is not null;
+
         try
         {
             // 0. Load the set of category GUIDs (IsFolder = true) for 'exists' validation.
             //    Categories and products come from the same catalog (Номенклатура);
             //    products reference categories via Parent → category_id.
             var categoryIdSet = LoadCategoryGuids(catalogName);
+
+            // 0b. Load price/stock data from registers (if requested by the profile).
+            IReadOnlyList<RegisterDataReader.PriceTypeInfo>? priceTypes = null;
+            Dictionary<string, Dictionary<string, (decimal Price, decimal MarkupPct, string Unit, string Period)>>? pricesByItem = null;
+            List<(string ItemGuid, string WarehouseGuid, string WarehouseName, decimal Quantity)>? stockRows = null;
+            Dictionary<string, string>? lastMovements = null;
+
+            if (readPrices)
+            {
+                priceTypes = _registerReader.LoadPriceTypes();
+                pricesByItem = _registerReader.LoadPrices();
+            }
+
+            if (readStock)
+            {
+                stockRows = _registerReader.LoadStock();
+                lastMovements = _registerReader.LoadLastMovements();
+            }
 
             // 1. Create a Query object (Latin method — works via dynamic).
             dynamic query = _session.Connection.NewObject("Query");
@@ -70,6 +94,39 @@ public sealed class CatalogReader
             while (selection.Next())
             {
                 var record = MapRecord(selection, profile, catalogName, categoryIdSet);
+
+                // Attach prices/stock to the record (if requested).
+                if (readPrices || readStock)
+                {
+                    var itemGuid = record.TryGetValue("id", out object? idVal) ? idVal?.ToString() : null;
+                    if (itemGuid is not null)
+                    {
+                        if (readPrices && priceTypes is not null && pricesByItem is not null)
+                        {
+                            var prices = _registerReader.BuildPrices(itemGuid, priceTypes, pricesByItem);
+                            record["prices"] = prices.Count > 0 ? prices : null;
+
+                            // skip_items_without_prices: drop the item if it has no prices.
+                            if (profile.SkipItemsWithoutPrices && prices.Count == 0)
+                            {
+                                continue;
+                            }
+                        }
+
+                        if (readStock && stockRows is not null && lastMovements is not null)
+                        {
+                            var stock = _registerReader.BuildStock(itemGuid, stockRows, lastMovements);
+                            record["stock"] = stock.Count > 0 ? stock : null;
+
+                            // skip_items_without_stock: drop the item if it has no stock.
+                            if (profile.SkipItemsWithoutStock && stock.Count == 0)
+                            {
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 records.Add(record);
                 count++;
 

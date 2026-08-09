@@ -1,6 +1,12 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Reflection;
+using System.Runtime.InteropServices;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OneC.Application.Abstractions.Services;
+using OneC.Infrastructure;
+using OneC.Infrastructure.Com;
 using OneC.Infrastructure.Profiles;
+using OneC.Infrastructure.Security;
 
 namespace OneC.Cli;
 
@@ -12,6 +18,7 @@ public sealed class CliApp
     private readonly ITestConnectionService _testConnectionService;
     private readonly IMetadataService _metadataService;
     private readonly IGetCatalogService _getCatalogService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<CliApp> _logger;
 
     /// <summary>
@@ -19,16 +26,20 @@ public sealed class CliApp
     /// </summary>
     /// <param name="testConnectionService">1C connection test service.</param>
     /// <param name="metadataService">Metadata service.</param>
+    /// <param name="getCatalogService">Catalog extraction service.</param>
+    /// <param name="configuration">Configuration.</param>
     /// <param name="logger">Logger instance.</param>
     public CliApp(
         ITestConnectionService testConnectionService,
         IMetadataService metadataService,
         IGetCatalogService getCatalogService,
+        IConfiguration configuration,
         ILogger<CliApp> logger)
     {
         _testConnectionService = testConnectionService;
         _metadataService = metadataService;
         _getCatalogService = getCatalogService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -62,6 +73,10 @@ public sealed class CliApp
 
             case "get-catalog":
                 await GetCatalogAsync(args, cancellationToken);
+                break;
+
+            case "inspect-register":
+                await InspectRegisterAsync(args, cancellationToken);
                 break;
 
             case "help":
@@ -228,6 +243,189 @@ public sealed class CliApp
         }
     }
 
+    /// <summary>
+    ///     Diagnostic: inspects the fields of a 1C register by running a query.
+    ///     Usage: inspect-register info|accum <register-name>
+    /// </summary>
+    private async Task InspectRegisterAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length < 3)
+        {
+            Console.WriteLine("Usage: OneC.Cli inspect-register info|accum <register-name> [remainders|last]");
+            return;
+        }
+
+        var isCatalog = args[1].Equals("catalog", StringComparison.OrdinalIgnoreCase)
+                        || args[1].Equals("cat", StringComparison.OrdinalIgnoreCase)
+                        || args[1].Equals("справочник", StringComparison.OrdinalIgnoreCase);
+
+        var registerKind = args[1].ToLowerInvariant() switch
+        {
+            "info" or "information" => "InformationRegister",
+            "accum" or "accumulation" => "AccumulationRegister",
+            _ => "InformationRegister",
+        };
+
+        var registerName = args[2];
+        var virtualMode = args.Length > 3 ? args[3].ToLowerInvariant() : string.Empty;
+
+        try
+        {
+            var connectionStringName = _configuration["ActiveConnection"] ?? "Kplus";
+            var connectionString = _configuration.GetConnectionString(connectionStringName);
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                Console.WriteLine($"Connection string '{connectionStringName}' is not configured.");
+                return;
+            }
+
+            var decrypted = DecryptPassword(connectionString);
+
+            using var session = new ComSession(
+                new ComConnector(Logging.CreateLogger<ComConnector>()),
+                Logging.CreateLogger<ComSession>());
+            session.Connect(decrypted);
+
+            // Use SELECT * to discover actual columns of the register.
+            // Row limit is enforced in the iteration loop below.
+            dynamic query = session.Connection.NewObject("Query");
+
+            // Optional virtual tables: remainders (accumulation) / last slice (information).
+            // Physical tables use Latin prefixes (AccumulationRegister.),
+            // virtual tables require Russian prefixes (РегистрНакопления.).
+            var russianKind = registerKind switch
+            {
+                "AccumulationRegister" => "РегистрНакопления",
+                "InformationRegister" => "РегистрСведений",
+                _ => registerKind,
+            };
+
+            var tableName = isCatalog
+                ? $"Справочник.{registerName}"
+                : virtualMode switch
+                {
+                    "remainders" or "остатки" or "virt" => $"{russianKind}.{registerName}.Остатки()",
+                    "last" or "срез" or "срезпоследних" => $"{russianKind}.{registerName}.СрезПоследних()",
+                    _ => $"{registerKind}.{registerName}",
+                };
+
+            query.Text = $"SELECT * FROM {tableName}";
+
+            dynamic result = query.Execute();
+            dynamic selection = result.Choose();
+
+            Console.WriteLine();
+            Console.WriteLine($"=== {registerKind}.{registerName} (first 5 rows) ===");
+
+            var rowIndex = 0;
+            while (selection.Next() && rowIndex < 5)
+            {
+                Console.WriteLine($"--- Row {rowIndex + 1} ---");
+                PrintObjectMembers(selection, session);
+                rowIndex++;
+            }
+
+            if (rowIndex == 0)
+            {
+                Console.WriteLine("  (no rows)");
+            }
+
+            Console.WriteLine("===========================");
+            Console.WriteLine();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to inspect register: {ErrorMessage}", ex.Message);
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    ///     Prints all accessible members of a COM selection row, attempting to read
+    ///     both Latin and Cyrillic property names.
+    /// </summary>
+    private void PrintObjectMembers(dynamic selection, ComSession session)
+    {
+        object obj = selection;
+        var type = obj.GetType();
+
+        // Try InvokeMember on a curated set of candidate fields.
+        var candidates = new[]
+        {
+            "Номенклатура", "ТипЦеныНоменклатуры", "ТипЦен", "Цена",
+            "Склад", "КоличествоОстаток", "СтоимостьОстаток",
+            "ВидДвижения", "Период", "Регистратор", "Active",
+            "Количество", "Стоимость", "ТипЦены",
+            "ХарактеристикаНоменклатуры", "Качество", "СтатусПартии",
+            "Ref", "Description", "Code",
+            "ПроцентНаценки", "ТипЦенБазовая", "БазовыйТипЦен", "СпособРасчетаЦены",
+            "ВалютаЦены", "ЕдиницаИзмерения", "Наценка", "Рассчитывается",
+            "ПроцентСкидкиНаценки", "СкидкаНаценка",
+            "ЦенаЗакупочная", "БазоваяЦена", "ЦенаБазовая", "ПроцентНаценки",
+            "ЦенаБазовая", "ЗакупочнаяЦена", "ЦенаЗакупки",
+        };
+
+        foreach (var name in candidates)
+        {
+            try
+            {
+                var value = type.InvokeMember(
+                    name,
+                    BindingFlags.GetField | BindingFlags.GetProperty,
+                    null,
+                    obj,
+                    null);
+                Console.WriteLine($"  {name} = {FormatValue(value, session)}");
+            }
+            catch (Exception)
+            {
+                // Field not present — skip.
+            }
+        }
+    }
+
+    private string? FormatValue(object? value, ComSession session)
+    {
+        if (value is null || value is DBNull)
+        {
+            return "<null>";
+        }
+
+        if (Marshal.IsComObject(value))
+        {
+            // Ref/GUID — try УникальныйИдентификатор, else String().
+            try
+            {
+                var type = value.GetType();
+                var guid = type.InvokeMember(
+                    "УникальныйИдентификатор",
+                    BindingFlags.InvokeMethod,
+                    null,
+                    value,
+                    null);
+                if (guid is not null)
+                {
+                    return "(Ref) " + session.String(guid);
+                }
+            }
+            catch (Exception)
+            {
+                // ignore
+            }
+
+            try
+            {
+                return "(COM) " + session.String(value);
+            }
+            catch (Exception)
+            {
+                return "(COM) unknown";
+            }
+        }
+
+        return value.ToString();
+    }
+
     private static string? GetFlagValue(string[] args, string flag)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -252,6 +450,41 @@ public sealed class CliApp
         return -1; // Default: all records.
     }
 
+    private static string DecryptPassword(string connectionString)
+    {
+        const string pwdMarker = "Pwd=\"";
+
+        var idx = connectionString.IndexOf(pwdMarker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+        {
+            return connectionString;
+        }
+
+        var start = idx + pwdMarker.Length;
+        var end = connectionString.IndexOf('"', start);
+        if (end < 0)
+        {
+            return connectionString;
+        }
+
+        var pwd = connectionString[start..end];
+
+        if (pwd.Any(c => char.IsLetter(c) && !char.IsWhiteSpace(c)))
+        {
+            try
+            {
+                var decrypted = ConnectionStringProtector.Decrypt(pwd);
+                return connectionString[..start] + decrypted + connectionString[end..];
+            }
+            catch (FormatException)
+            {
+                // treat as plain text
+            }
+        }
+
+        return connectionString;
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
@@ -266,6 +499,7 @@ public sealed class CliApp
                              list-enums         List enums from XSD schema
                              show-catalog <name> Show catalog fields with types
                              get-catalog --profile <file> [--mode full|incremental] [--batch-size N]
+                             inspect-register info|accum <name>  Inspect register fields (diagnostic)
                              help               Show this help
 
                            Examples:
@@ -274,6 +508,9 @@ public sealed class CliApp
                              OneC.Cli list-enums
                              OneC.Cli show-catalog Номенклатура
                              OneC.Cli get-catalog --profile profiles/categories.json --batch-size -1
+                             OneC.Cli inspect-register info ЦеныНоменклатуры
+                             OneC.Cli inspect-register accum ТоварыНаСкладах
                            """);
     }
+
 }

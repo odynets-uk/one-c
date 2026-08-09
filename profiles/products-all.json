@@ -4,7 +4,9 @@
   "mode": "full",
   "batch_size": -1,
   "filters": {
-    "field_filters": { "IsFolder": false }
+    "field_filters": { "IsFolder": false },
+    "prices": { "price_types": ["*"], "exclude_zero_price": false },
+    "stock": { "warehouses": ["*"], "only_positive": false }
   },
   "skip_items_without_prices": false,
   "skip_items_without_stock": false,
