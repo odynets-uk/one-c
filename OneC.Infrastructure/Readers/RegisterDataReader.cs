@@ -176,16 +176,13 @@ public sealed class RegisterDataReader
     /// <summary>
     ///     The raw register query (full price history). Used as a fallback if
     ///     СрезПоследних (latest slice) throws a non-fatal COM exception.
-    ///     GUIDs are resolved directly in the query via УникальныйИдентификатор()
-    ///     — no COM round-trip per row.
     /// </summary>
     private const string RawPricesQuery = """
                                           SELECT
-                                              Цены.Номенклатура.УникальныйИдентификатор() AS ItemGuid,
-                                              Цены.ТипЦен.УникальныйИдентификатор() AS TypeGuid,
+                                              Цены.Номенклатура AS Item,
+                                              Цены.ТипЦен AS PriceType,
                                               Цены.Цена AS Price,
                                               Цены.ПроцентСкидкиНаценки AS MarkupPct,
-                                              Цены.ЕдиницаИзмерения.УникальныйИдентификатор() AS UnitGuid,
                                               Цены.ЕдиницаИзмерения AS Unit,
                                               Цены.Период AS Period
                                           FROM
@@ -235,11 +232,10 @@ public sealed class RegisterDataReader
             dynamic query = _session.Connection.NewObject("Query");
             query.Text = """
                          SELECT
-                             Цены.Номенклатура.УникальныйИдентификатор() AS ItemGuid,
-                             Цены.ТипЦен.УникальныйИдентификатор() AS TypeGuid,
+                             Цены.Номенклатура AS Item,
+                             Цены.ТипЦен AS PriceType,
                              Цены.Цена AS Price,
                              Цены.ПроцентСкидкиНаценки AS MarkupPct,
-                             Цены.ЕдиницаИзмерения.УникальныйИдентификатор() AS UnitGuid,
                              Цены.ЕдиницаИзмерения AS Unit,
                              Цены.Период AS Period
                          FROM
@@ -288,11 +284,8 @@ public sealed class RegisterDataReader
         for (var i = 0; i < rowCount; i++)
         {
             dynamic row = table.Get(i);
-
-            // GUIDs come pre-resolved from the query (УникальныйИдентификатор()).
-            // OneCRef.FromString normalizes: empty ref (all-zero GUID) → null.
-            var itemGuid = OneCRef.FromString(row.ItemGuid?.ToString())?.ToString();
-            var typeGuid = OneCRef.FromString(row.TypeGuid?.ToString())?.ToString();
+            var itemGuid = GetRefGuid(row.Item, refCache);
+            var typeGuid = GetRefGuid(row.PriceType, refCache);
             if (itemGuid is null || typeGuid is null)
             {
                 continue;
@@ -301,7 +294,7 @@ public sealed class RegisterDataReader
             // Explicitly typed variables: row.X is dynamic, so ToDecimal
             // results would otherwise be typed dynamic → tuple literal becomes
             // ValueTuple<object,...> which cannot be stored in ValueTuple<decimal,decimal,string,string>.
-            string unit = row.UnitGuid?.ToString() ?? GetRefName(row.Unit);
+            string unit = GetRefName(row.Unit);
             decimal price = ToDecimal(row.Price);
             decimal markupPct = ToDecimal(row.MarkupPct);
             string period = FormatDateTime(row.Period);
@@ -356,7 +349,7 @@ public sealed class RegisterDataReader
             for (var i = 0; i < rowCount; i++)
             {
                 dynamic row = table.Get(i);
-                var itemGuid = GetRefGuid(row.Item);
+                var itemGuid = GetRefGuid(row.Item, refCache);
                 var whGuid = GetRefGuid(row.Warehouse);
                 if (itemGuid is null || whGuid is null)
                 {
@@ -413,7 +406,7 @@ public sealed class RegisterDataReader
             for (var i = 0; i < rowCount; i++)
             {
                 dynamic row = table.Get(i);
-                var itemGuid = GetRefGuid(row.Item);
+                var itemGuid = GetRefGuid(row.Item, refCache);
                 var whGuid = GetRefGuid(row.Warehouse);
                 if (itemGuid is null || whGuid is null)
                 {
@@ -552,7 +545,7 @@ public sealed class RegisterDataReader
         return v8Array;
     }
 
-    private string? GetRefGuid(object? refObject)
+    private string? GetRefGuid(object? refObject, RefCache? refCache = null)
     {
         if (refObject is null || refObject is DBNull)
         {
@@ -564,7 +557,26 @@ public sealed class RegisterDataReader
             return null;
         }
 
-        // Extract the GUID via УникальныйИдентификатор (like CatalogReader.GetRefId).
+        // Fast path: resolve the GUID via the reverse IUnknown map (no COM round-trip).
+        // Marshal.GetIUnknownForObject returns the pointer of the underlying COM object
+        // itself (not the RCW), so all RCW wrappers for the same reference hit the same key.
+        if (refCache is not null)
+        {
+            var iUnknown = Marshal.GetIUnknownForObject(refObject);
+            try
+            {
+                if (refCache.ByIUnknown.TryGetValue(iUnknown, out var cachedGuid))
+                {
+                    return cachedGuid;
+                }
+            }
+            finally
+            {
+                Marshal.Release(iUnknown);
+            }
+        }
+
+        // Fallback: extract the GUID via УникальныйИдентификатор (like CatalogReader.GetRefId).
         // String(ref) in 1C returns the display name, not the GUID.
         try
         {
