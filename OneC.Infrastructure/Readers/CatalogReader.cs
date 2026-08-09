@@ -145,6 +145,15 @@ public sealed class CatalogReader
 
     private static string BuildFieldCondition(string alias, string field, object? value)
     {
+        // JsonElement array (from JSON deserialization of field_filters) → IN (...)
+        if (value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Array } arr)
+        {
+            var items = arr.EnumerateArray().Select(je => FormatFilterValue((object)je)).ToList();
+            return items.Count > 0
+                ? $"{alias}.{field} IN ({string.Join(", ", items)})"
+                : "1 = 0"; // empty array → no rows
+        }
+
         // Array → IN (...)
         if (value is System.Collections.IEnumerable enumerable and not string)
         {
