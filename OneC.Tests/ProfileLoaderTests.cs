@@ -340,4 +340,5 @@ public class ProfileLoaderTests
 
         Assert.Equal("2026-07-01:2026-07-31", profile.Filters!.Stock!.ChangedSince);
     }
+
 }
