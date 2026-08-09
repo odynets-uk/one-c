@@ -45,6 +45,11 @@ public sealed class CatalogReader
 
         try
         {
+            // 0. Load the set of category GUIDs (IsFolder = true) for 'exists' validation.
+            //    Categories and products come from the same catalog (Номенклатура);
+            //    products reference categories via Parent → category_id.
+            var categoryIdSet = LoadCategoryGuids(catalogName);
+
             // 1. Create a Query object (Latin method — works via dynamic).
             dynamic query = _session.Connection.NewObject("Query");
 
@@ -62,10 +67,9 @@ public sealed class CatalogReader
 
             // 4. Iterate (Latin method).
             var count = 0;
-            var idSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             while (selection.Next())
             {
-                var record = MapRecord(selection, profile, catalogName, idSet);
+                var record = MapRecord(selection, profile, catalogName, categoryIdSet);
                 records.Add(record);
                 count++;
 
@@ -89,6 +93,34 @@ public sealed class CatalogReader
         }
 
         return records;
+    }
+
+    /// <summary>
+    ///     Loads the GUIDs of all categories (IsFolder = true) from the catalog.
+    ///     Categories and products live in the same catalog (Номенклатура);
+    ///     products reference categories via Parent. Used for 'exists' validation.
+    /// </summary>
+    private HashSet<string> LoadCategoryGuids(string catalogName)
+    {
+        var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        dynamic query = _session.Connection.NewObject("Query");
+        query.Text = $"SELECT {catalogName}.Ref AS Ref FROM Справочник.{catalogName} AS {catalogName} WHERE {catalogName}.IsFolder = TRUE";
+        dynamic result = query.Execute();
+        dynamic selection = result.Choose();
+        while (selection.Next())
+        {
+            var refObj = selection.Ref;
+            if (refObj is not null)
+            {
+                var guid = GetRefId(refObj);
+                if (guid is not null)
+                {
+                    guids.Add(guid);
+                }
+            }
+        }
+        _logger.LogInformation("Loaded {Count} category GUIDs (IsFolder=true) from '{CatalogName}'.", guids.Count, catalogName);
+        return guids;
     }
 
     private static string ExtractCatalogName(string catalogType)
@@ -242,13 +274,7 @@ public sealed class CatalogReader
                     var mapped = _mapper.Map(rawValue, column);
                     record[column.Name] = ConvertToDbValue(mapped, column);
 
-                    // Collect the 'id' column values for 'exists' validation.
-                    if (column.Name.Equals("id", StringComparison.OrdinalIgnoreCase) && mapped is not null)
-                    {
-                        idSet.Add(mapped.ToString()!);
-                    }
-
-                    // 'exists' runtime validation: value must be null or exist in the collected id set.
+                    // 'exists' runtime validation: value must be null or exist in the loaded category guid set.
                     if (column.Validation?.Exists is not null && mapped is not null)
                     {
                         var existsRef = column.Validation.Exists;
