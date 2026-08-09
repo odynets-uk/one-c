@@ -18,7 +18,10 @@ namespace OneC.Infrastructure.Readers;
 /// </summary>
 public sealed class RegisterDataReader
 {
-    private const int RefBatchSize = 500;
+    // Batch size for the 1C array of references (В (&ItemsArray)).
+    // Larger batches = fewer register passes (each batch scans the register history).
+    // 500 -> 30 passes for 15k items; 2000 -> 8 passes (~3.75x faster).
+    private const int RefBatchSize = 2000;
 
     private readonly ComSession _session;
     private readonly ILogger _logger;
