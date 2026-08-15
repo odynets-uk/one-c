@@ -142,7 +142,7 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 |---|---|
 | `price_types` | Список типів цін або `["*"]` (всі). Фільтрує `price_type` |
 | `exclude_zero_price` | Виключити ціни з `price == 0.0` |
-| `changed_since` | Період змін. Відносний: `"14d"`, `"2w"`, `"6h"` (суфікси `s/m/h/d/w`) або абсолютний діапазон `"2026-07-01:2026-07-31"`. Фільтрує `timestamp` |
+| `changed_since` | Період змін. Відносний: `"14d"`, `"2w"`, `"6h"` (суфікси `s/m/h/d/w`) або абсолютний діапазон `"2026-07-01:2026-07-31"`. Фільтрує `Период` регістра — повертає лише ціни, змінені в межах періоду (остання на (item, type)) |
 
 ### `filters.stock` (залишки — масив об'єктів)
 
@@ -150,7 +150,39 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 |---|---|
 | `warehouses` | Список складів або `["*"]` (всі). Фільтрує `warehouse` |
 | `only_positive` | Тільки позитивні залишки (`quantity > 0`) |
-| `changed_since` | Період змін (див. вище). Фільтрує `last_movement` |
+| `changed_since` | Період змін (див. вище). Фільтрує `last_movement` — повертає лише склади з рухом у межах періоду |
+
+### Незалежне фільтрування цін і залишків (OR)
+
+Коли `changed_since` задано для **цін** і/або **залишків**, товар зберігається у вибірці, якщо він задовольняє **хоча б один** з активних фільтрів (OR):
+
+- Товар зі зміненою ціною за період, але без змін залишків → у вибірці (з цінами).
+- Товар зі зміненими залишками за період, але без змін ціни → у вибірці (із залишками).
+- Товар без змін ні цін, ні залишків → виключений.
+
+Приклад профілю з незалежним фільтруванням за 45 днів:
+
+```json
+{
+  "name": "products-all-45d",
+  "source": { "type": "CatalogObject.Номенклатура", "schema": "./data-enterprise.xsd" },
+  "mode": "incremental",
+  "batch_size": -1,
+  "filters": {
+    "field_filters": { "IsFolder": false },
+    "prices": { "price_types": ["*"], "exclude_zero_price": false, "changed_since": "45d" },
+    "stock": { "warehouses": ["*"], "only_positive": false, "changed_since": "45d" }
+  },
+  "skip_items_without_prices": false,
+  "skip_items_without_stock": false,
+  "output": {
+    "json": { "file_path": "export/<profile>-<mode>-<batch-size>-<timestamp>.json", "pretty": true },
+    "db": { "file_path": "export/kplus.db", "engine": "sqlite", "version": "3.37+" }
+  },
+  "table": "products",
+  "columns": [ ... ]
+}
+```
 
 ### `filters.items` (для product-профілів)
 
