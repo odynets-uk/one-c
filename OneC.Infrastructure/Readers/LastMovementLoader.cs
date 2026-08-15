@@ -12,6 +12,7 @@ public sealed class LastMovementLoader
 {
     private readonly IComSession _session;
     private readonly ReferenceResolver _referenceResolver;
+    private readonly RefArrayFactory _refArrayFactory;
     private readonly ILogger _logger;
 
     // Batch size for the 1C array of references (В (&ItemsArray)).
@@ -19,10 +20,11 @@ public sealed class LastMovementLoader
     // keeps GROUP BY queries responsive without overloading the server.
     private const int RefBatchSize = 2000;
 
-    public LastMovementLoader(IComSession session, ReferenceResolver referenceResolver, ILogger logger)
+    public LastMovementLoader(IComSession session, ReferenceResolver referenceResolver, RefArrayFactory refArrayFactory, ILogger logger)
     {
         _session = session;
         _referenceResolver = referenceResolver;
+        _refArrayFactory = refArrayFactory;
         _logger = logger;
     }
 
@@ -74,7 +76,7 @@ public sealed class LastMovementLoader
                     """;
 
             query.Text = text;
-            query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+            query.SetParameter("ItemsArray", _refArrayFactory.CreateRefArray(batch, refCache));
             if (sinceDate is not null)
             {
                 query.SetParameter("SinceDate", sinceDate.Value);
@@ -105,18 +107,58 @@ public sealed class LastMovementLoader
     }
 
     /// <summary>
-    ///     Creates a 1C Массив of catalog references for the given GUID batch,
-    ///     reusing the already-built reference cache.
+    ///     Returns the distinct item GUIDs that had a stock movement within the given
+    ///     period. Reads the PHYSICAL register table with a period filter — no item
+    ///     filter, because the changed GUIDs are unknown yet.
+    ///     Used to pre-filter the catalog before reading it.
     /// </summary>
-    private dynamic CreateRefArray(IEnumerable<string> guids, RefCache refCache)
+    public IReadOnlyCollection<string> LoadChangedItemGuids(string changedSince)
     {
-        dynamic v8Array = _session.Connection.NewObject("Массив");
-        foreach (var guid in guids)
+        var sw = Stopwatch.StartNew();
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var (sinceDate, toDate) = PeriodParser.Parse(changedSince);
+        if (sinceDate is null)
         {
-            v8Array.Add(refCache.ByGuid[guid]);
+            return result;
         }
 
-        return v8Array;
+        dynamic query = _session.Connection.NewObject("Query");
+
+        var text = """
+                   SELECT DISTINCT
+                       Рух.Номенклатура AS Item
+                   FROM
+                       РегистрНакопления.ТоварыНаСкладах AS Рух
+                   WHERE
+                       Рух.Период >= &SinceDate
+                   """;
+
+        if (toDate is not null)
+        {
+            text += "\n    AND Рух.Период <= &ToDate";
+        }
+
+        query.Text = text;
+        query.SetParameter("SinceDate", sinceDate.Value);
+        if (toDate is not null)
+        {
+            query.SetParameter("ToDate", toDate.Value);
+        }
+
+        dynamic table = query.Execute().Unload();
+        int rowCount = table.Count();
+        for (var i = 0; i < rowCount; i++)
+        {
+            dynamic row = table.Get(i);
+            var itemGuid = _referenceResolver.GetRefGuid(row.Item);
+            if (itemGuid is not null)
+            {
+                result.Add(itemGuid);
+            }
+        }
+
+        _logger.LogInformation("Loaded {Count} changed item GUIDs (stock) in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
+        return result;
     }
 
     private static string FormatDateTime(object? value)

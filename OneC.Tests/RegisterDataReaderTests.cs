@@ -20,10 +20,11 @@ public class RegisterDataReaderTests
         var session = new ComSession(connector, NullLogger<ComSession>.Instance);
         var resolver = new ReferenceResolver(session, NullLogger.Instance);
         var refCacheBuilder = new RefCacheBuilder(session, NullLogger.Instance);
+        var refArrayFactory = new RefArrayFactory(session);
         var priceTypeLoader = new PriceTypeLoader(session, NullLogger.Instance);
-        var priceLoader = new PriceLoader(session, resolver, NullLogger.Instance);
+        var priceLoader = new PriceLoader(session, resolver, refArrayFactory, NullLogger.Instance);
         var stockLoader = new StockLoader(session, resolver, NullLogger.Instance);
-        var lastMovementLoader = new LastMovementLoader(session, resolver, NullLogger.Instance);
+        var lastMovementLoader = new LastMovementLoader(session, resolver, refArrayFactory, NullLogger.Instance);
         var priceCalculator = new PriceCalculator(NullLogger.Instance);
         var stockBuilder = new StockBuilder(NullLogger.Instance);
         return new RegisterDataReader(
@@ -186,6 +187,28 @@ public class RegisterDataReaderTests
         var lastMovements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         var result = reader.BuildStock("item-1", stockByItem, lastMovements);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void LoadChangedItemGuids_NoPeriods_ReturnsEmpty()
+    {
+        // Both periods null → no COM round-trips (loaders return empty sets).
+        var reader = CreateReader();
+
+        var result = reader.LoadChangedItemGuids(null, null);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void LoadChangedItemGuids_InvalidPeriods_ReturnsEmpty()
+    {
+        // Invalid period strings parse to null → loaders return empty sets.
+        var reader = CreateReader();
+
+        var result = reader.LoadChangedItemGuids("invalid", "45x");
 
         Assert.Empty(result);
     }

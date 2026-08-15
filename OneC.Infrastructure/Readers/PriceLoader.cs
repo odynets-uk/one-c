@@ -12,6 +12,7 @@ public sealed class PriceLoader
 {
     private readonly IComSession _session;
     private readonly ReferenceResolver _referenceResolver;
+    private readonly RefArrayFactory _refArrayFactory;
     private readonly ILogger _logger;
 
     // Batch size for the 1C array of references (В (&ItemsArray)).
@@ -19,10 +20,11 @@ public sealed class PriceLoader
     // made 1C very slow (~250s). 2000 refs per batch keeps each query fast.
     private const int RefBatchSize = 2000;
 
-    public PriceLoader(IComSession session, ReferenceResolver referenceResolver, ILogger logger)
+    public PriceLoader(IComSession session, ReferenceResolver referenceResolver, RefArrayFactory refArrayFactory, ILogger logger)
     {
         _session = session;
         _referenceResolver = referenceResolver;
+        _refArrayFactory = refArrayFactory;
         _logger = logger;
     }
 
@@ -75,7 +77,7 @@ public sealed class PriceLoader
                 }
 
                 query.Text = text;
-                query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+                query.SetParameter("ItemsArray", _refArrayFactory.CreateRefArray(batch, refCache));
                 query.SetParameter("SinceDate", sinceDate.Value);
                 if (toDate is not null)
                 {
@@ -98,7 +100,7 @@ public sealed class PriceLoader
                                  Цены.Номенклатура В (&ItemsArray)
                              """;
 
-                query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+                query.SetParameter("ItemsArray", _refArrayFactory.CreateRefArray(batch, refCache));
             }
 
             dynamic table = query.Execute().Unload();
@@ -110,18 +112,58 @@ public sealed class PriceLoader
     }
 
     /// <summary>
-    ///     Creates a 1C Массив of catalog references for the given GUID batch,
-    ///     reusing the already-built reference cache.
+    ///     Returns the distinct item GUIDs that had a price change within the given
+    ///     period. Reads the PHYSICAL register table (one row per change) with a
+    ///     period filter — no item filter, because the changed GUIDs are unknown yet.
+    ///     Used to pre-filter the catalog before reading it.
     /// </summary>
-    private dynamic CreateRefArray(IEnumerable<string> guids, RefCache refCache)
+    public IReadOnlyCollection<string> LoadChangedItemGuids(string changedSince)
     {
-        dynamic v8Array = _session.Connection.NewObject("Массив");
-        foreach (var guid in guids)
+        var sw = Stopwatch.StartNew();
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var (sinceDate, toDate) = PeriodParser.Parse(changedSince);
+        if (sinceDate is null)
         {
-            v8Array.Add(refCache.ByGuid[guid]);
+            return result;
         }
 
-        return v8Array;
+        dynamic query = _session.Connection.NewObject("Query");
+
+        var text = """
+                   SELECT DISTINCT
+                       Цены.Номенклатура AS Item
+                   FROM
+                       РегистрСведений.ЦеныНоменклатуры AS Цены
+                   WHERE
+                       Цены.Период >= &SinceDate
+                   """;
+
+        if (toDate is not null)
+        {
+            text = text.Replace("Цены.Период >= &SinceDate", "Цены.Период >= &SinceDate AND Цены.Период <= &ToDate");
+        }
+
+        query.Text = text;
+        query.SetParameter("SinceDate", sinceDate.Value);
+        if (toDate is not null)
+        {
+            query.SetParameter("ToDate", toDate.Value);
+        }
+
+        dynamic table = query.Execute().Unload();
+        int rowCount = table.Count();
+        for (var i = 0; i < rowCount; i++)
+        {
+            dynamic row = table.Get(i);
+            var itemGuid = _referenceResolver.GetRefGuid(row.Item);
+            if (itemGuid is not null)
+            {
+                result.Add(itemGuid);
+            }
+        }
+
+        _logger.LogInformation("Loaded {Count} changed item GUIDs (prices) in {ElapsedMs} ms.", result.Count, sw.ElapsedMilliseconds);
+        return result;
     }
 
     /// <summary>

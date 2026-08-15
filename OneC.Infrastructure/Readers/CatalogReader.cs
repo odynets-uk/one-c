@@ -21,6 +21,7 @@ public sealed class CatalogReader
     private readonly ILogger<CatalogReader> _logger;
     private readonly IRegisterDataReader _registerReader;
     private readonly ReferenceResolver _referenceResolver;
+    private readonly RefArrayFactory _refArrayFactory;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="CatalogReader" /> class.
@@ -30,13 +31,14 @@ public sealed class CatalogReader
     /// <param name="logger">Logger instance.</param>
     /// <param name="registerReader">Register data reader.</param>
     /// <param name="referenceResolver">Reference resolver for cached GUID extraction.</param>
-    public CatalogReader(IComSession session, ComValueMapper mapper, ILogger<CatalogReader> logger, IRegisterDataReader registerReader, ReferenceResolver referenceResolver)
+    public CatalogReader(IComSession session, ComValueMapper mapper, ILogger<CatalogReader> logger, IRegisterDataReader registerReader, ReferenceResolver referenceResolver, RefArrayFactory refArrayFactory)
     {
         _session = session;
         _mapper = mapper;
         _logger = logger;
         _registerReader = registerReader;
         _referenceResolver = referenceResolver;
+        _refArrayFactory = refArrayFactory;
     }
 
     /// <summary>
@@ -55,6 +57,9 @@ public sealed class CatalogReader
         // Whether to read prices/stock from registers.
         var readPrices = profile.Filters?.Prices is not null;
         var readStock = profile.Filters?.Stock is not null;
+        var pricesChangedSince = profile.Filters?.Prices?.ChangedSince;
+        var stockChangedSince = profile.Filters?.Stock?.ChangedSince;
+        var hasChangedSince = pricesChangedSince is not null || stockChangedSince is not null;
 
         try
         {
@@ -66,6 +71,25 @@ public sealed class CatalogReader
             categorySw.Stop();
             _logger.LogInformation("Stage category-guids done in {ElapsedMs} ms.", categorySw.ElapsedMilliseconds);
 
+            // 0b. For changed_since: pre-filter the catalog to only changed items.
+            //     Load the changed GUIDs from registers (prices OR stock), build the
+            //     ref cache for them, then read the catalog with WHERE Ref IN (...).
+            //     This avoids iterating the entire catalog (15k+ records) when only
+            //     a few hundred items changed.
+            RefCache? refCache = null;
+            if (hasChangedSince)
+            {
+                var changedSw = Stopwatch.StartNew();
+                var changedGuids = _registerReader.LoadChangedItemGuids(pricesChangedSince, stockChangedSince);
+                changedSw.Stop();
+                _logger.LogInformation("Stage changed-guids done: {Count} GUIDs in {ElapsedMs} ms.", changedGuids.Count, changedSw.ElapsedMilliseconds);
+
+                var refCacheSw = Stopwatch.StartNew();
+                refCache = _registerReader.BuildRefCache(changedGuids, catalogName);
+                refCacheSw.Stop();
+                _logger.LogInformation("Stage ref-cache done in {ElapsedMs} ms.", refCacheSw.ElapsedMilliseconds);
+            }
+
             // 1. Create a Query object (Latin method — works via dynamic).
             dynamic query = _session.Connection.NewObject("Query");
 
@@ -73,7 +97,21 @@ public sealed class CatalogReader
             var selectClause = BuildSelectClause(profile, catalogName);
             var whereClause = BuildWhereClause(profile, catalogName);
 
+            // For changed_since, restrict the catalog read to the changed items only.
+            if (hasChangedSince && refCache is not null)
+            {
+                var refIn = $"{catalogName}.Ref IN (&ChangedItems)";
+                whereClause = whereClause.Length > 0
+                    ? $"{whereClause} AND {refIn}"
+                    : $"WHERE {refIn}";
+            }
+
             query.Text = $"SELECT {selectClause} FROM Справочник.{catalogName} AS {catalogName} {whereClause}";
+
+            if (hasChangedSince && refCache is not null)
+            {
+                query.SetParameter("ChangedItems", _refArrayFactory.CreateRefArray(refCache.ByGuid.Keys, refCache));
+            }
 
             _logger.LogInformation("Executing query: {QueryText}", (string)query.Text);
 
@@ -127,10 +165,15 @@ public sealed class CatalogReader
             {
                 // Build the GUID -> COM reference cache ONCE and reuse it
                 // across LoadPrices/LoadStock/LoadLastMovements.
-                var refCacheSw = Stopwatch.StartNew();
-                var refCache = _registerReader.BuildRefCache(itemGuids, catalogName);
-                refCacheSw.Stop();
-                _logger.LogInformation("Stage ref-cache done in {ElapsedMs} ms.", refCacheSw.ElapsedMilliseconds);
+                // For changed_since, the cache was already built in stage 0b.
+                var registerRefCache = refCache;
+                if (registerRefCache is null)
+                {
+                    var refCacheSw = Stopwatch.StartNew();
+                    registerRefCache = _registerReader.BuildRefCache(itemGuids, catalogName);
+                    refCacheSw.Stop();
+                    _logger.LogInformation("Stage ref-cache done in {ElapsedMs} ms.", refCacheSw.ElapsedMilliseconds);
+                }
 
             if (readPrices)
             {
@@ -141,7 +184,7 @@ public sealed class CatalogReader
                 _logger.LogInformation("Stage price-types done in {ElapsedMs} ms.", priceTypesSw.ElapsedMilliseconds);
 
                 var pricesSw = Stopwatch.StartNew();
-                pricesByItem = _registerReader.LoadPrices(itemGuids, refCache, profile.Filters?.Prices?.ChangedSince);
+                pricesByItem = _registerReader.LoadPrices(itemGuids, registerRefCache, profile.Filters?.Prices?.ChangedSince);
                 pricesSw.Stop();
                 _logger.LogInformation("Stage prices done in {ElapsedMs} ms.", pricesSw.ElapsedMilliseconds);
             }
@@ -149,12 +192,12 @@ public sealed class CatalogReader
             if (readStock)
             {
                 var stockSw = Stopwatch.StartNew();
-                stockByItem = _registerReader.LoadStock(itemGuids, refCache);
+                stockByItem = _registerReader.LoadStock(itemGuids, registerRefCache);
                 stockSw.Stop();
                 _logger.LogInformation("Stage stock done in {ElapsedMs} ms.", stockSw.ElapsedMilliseconds);
 
                 var lastMovSw = Stopwatch.StartNew();
-                lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache, profile.Filters?.Stock?.ChangedSince);
+                lastMovements = _registerReader.LoadLastMovements(itemGuids, registerRefCache, profile.Filters?.Stock?.ChangedSince);
                 lastMovSw.Stop();
                 _logger.LogInformation("Stage last-movements done in {ElapsedMs} ms.", lastMovSw.ElapsedMilliseconds);
             }
@@ -166,8 +209,8 @@ public sealed class CatalogReader
             //    so a price change keeps the item even if stock didn't move, and vice versa.
             if (readPrices || readStock)
             {
-                var pricesChangedSince = profile.Filters?.Prices?.ChangedSince is not null;
-                var stockChangedSince = profile.Filters?.Stock?.ChangedSince is not null;
+                var pricesFilterActive = pricesChangedSince is not null;
+                var stockFilterActive = stockChangedSince is not null;
 
                 var filtered = new List<Dictionary<string, object?>>(records.Count);
                 foreach (var record in records)
@@ -192,7 +235,7 @@ public sealed class CatalogReader
                             // When changed_since is set for stock, keep only warehouses
                             // that had movement within the period (LoadLastMovements already
                             // filtered by period, so empty LastMovement = no movement in window).
-                            if (stockChangedSince)
+                            if (stockFilterActive)
                             {
                                 stock = stock.Where(s => !string.IsNullOrEmpty(s.LastMovement)).ToList();
                             }
@@ -204,16 +247,16 @@ public sealed class CatalogReader
 
                     // Determine whether to keep the item.
                     var keep = true;
-                    if (pricesChangedSince && stockChangedSince)
+                    if (pricesFilterActive && stockFilterActive)
                     {
                         // OR: keep if prices changed OR stock changed.
                         keep = hasPrices || hasStock;
                     }
-                    else if (pricesChangedSince)
+                    else if (pricesFilterActive)
                     {
                         keep = hasPrices;
                     }
-                    else if (stockChangedSince)
+                    else if (stockFilterActive)
                     {
                         keep = hasStock;
                     }

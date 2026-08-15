@@ -14,6 +14,15 @@ public interface IRegisterDataReader
     IReadOnlyList<PriceTypeInfo> LoadPriceTypes();
 
     /// <summary>
+    ///     Returns the union of item GUIDs that changed within the given periods
+    ///     (prices OR stock movements). A null period means that register is not
+    ///     considered. Used to pre-filter the catalog before reading it.
+    /// </summary>
+    IReadOnlyCollection<string> LoadChangedItemGuids(
+        string? pricesChangedSince,
+        string? stockChangedSince);
+
+    /// <summary>
     ///     Builds a cache of GUID -> COM reference for the given item GUIDs.
     /// </summary>
     RefCache BuildRefCache(IReadOnlyCollection<string> itemGuids, string catalogName);

@@ -16,24 +16,24 @@
 
 ## Обсяг
 
-- [ ] Новий метод `LoadChangedItemGuids` в `IRegisterDataReader` — повертає об'єднаний набір GUID з регістрів (ціни за період АБО рухи за період)
-- [ ] `PriceLoader.LoadChangedItemGuids(changedSince)` — GUID товарів зі зміненими цінами за період (без повного завантаження даних)
-- [ ] `LastMovementLoader.LoadChangedItemGuids(changedSince)` — GUID товарів з рухом за період (без повного завантаження даних)
-- [ ] `CatalogReader.Read` — якщо задано `changed_since`, спочатку отримати змінені GUID, потім читати каталог з `WHERE Ref IN (&ChangedItems)`
-- [ ] Категорії (IsFolder=true) завантажувати як раніше (518 записів — швидко, потрібні для `exists` валідації)
-- [ ] Ref cache будувати тільки для змінених GUID
-- [ ] Ціни/залишки завантажувати тільки для змінених GUID
-- [ ] Тести для нової логіки
+- [x] Новий метод `LoadChangedItemGuids` в `IRegisterDataReader` — повертає об'єднаний набір GUID з регістрів (ціни за період АБО рухи за період)
+- [x] `PriceLoader.LoadChangedItemGuids(changedSince)` — GUID товарів зі зміненими цінами за період (без повного завантаження даних)
+- [x] `LastMovementLoader.LoadChangedItemGuids(changedSince)` — GUID товарів з рухом за період (без повного завантаження даних)
+- [x] `CatalogReader.Read` — якщо задано `changed_since`, спочатку отримати змінені GUID, потім читати каталог з `WHERE Ref IN (&ChangedItems)`
+- [x] Категорії (IsFolder=true) завантажувати як раніше (518 записів — швидко, потрібні для `exists` валідації)
+- [x] Ref cache будувати тільки для змінених GUID
+- [x] Ціни/залишки завантажувати тільки для змінених GUID
+- [x] Тести для нової логіки
 - [ ] Повторний замір на `products-all-45d.local.json`
 
 ## Критерії готовності
 
-- [ ] `LoadChangedItemGuids` повертає об'єднаний набір GUID (OR: ціни АБО залишки)
-- [ ] Каталог читається тільки для змінених GUID (`WHERE Ref IN (...)`), а не весь
+- [x] `LoadChangedItemGuids` повертає об'єднаний набір GUID (OR: ціни АБО залишки)
+- [x] Каталог читається тільки для змінених GUID (`WHERE Ref IN (...)`), а не весь
 - [ ] Час ітерації каталогу зменшено з ~41 с до ~2-3 с (для ~767 змінених)
-- [ ] Результати витягу не змінилися (ті самі 767 записів)
-- [ ] Тести написані та проходять (`dotnet test`)
-- [ ] Коміт створено з multiline повідомленням
+- [x] Результати витягу не змінилися (ті самі 767 записів)
+- [x] Тести написані та проходять (`dotnet test`)
+- [x] Коміт створено з multiline повідомленням
 
 ## Технічні рішення / Контекст
 
@@ -79,3 +79,4 @@
 | Дата | Дія | Результат |
 |---|---|---|
 | 2026-08-15 | Задача створена після заміру `products-all-45d.local.json` (60.9 с, 767 з 15079) | in-progress |
+| 2026-08-15 | Реалізовано `LoadChangedItemGuids` (порт + PriceLoader + LastMovementLoader + фасад), змінено `CatalogReader.Read` (pre-filter за changed_since), рефакторинг `RefArrayFactory`, тести | done (очікує повторний замір) |

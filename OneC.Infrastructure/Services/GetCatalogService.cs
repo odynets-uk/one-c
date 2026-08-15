@@ -65,10 +65,11 @@ public sealed class GetCatalogService : IGetCatalogService
         var mapper = new ComValueMapper(session, Logging.CreateLogger<ComValueMapper>());
         var resolver = new ReferenceResolver(session, Logging.CreateLogger<ReferenceResolver>());
         var refCacheBuilder = new RefCacheBuilder(session, Logging.CreateLogger<RefCacheBuilder>());
+        var refArrayFactory = new RefArrayFactory(session);
         var priceTypeLoader = new PriceTypeLoader(session, Logging.CreateLogger<PriceTypeLoader>());
-        var priceLoader = new PriceLoader(session, resolver, Logging.CreateLogger<PriceLoader>());
+        var priceLoader = new PriceLoader(session, resolver, refArrayFactory, Logging.CreateLogger<PriceLoader>());
         var stockLoader = new StockLoader(session, resolver, Logging.CreateLogger<StockLoader>());
-        var lastMovementLoader = new LastMovementLoader(session, resolver, Logging.CreateLogger<LastMovementLoader>());
+        var lastMovementLoader = new LastMovementLoader(session, resolver, refArrayFactory, Logging.CreateLogger<LastMovementLoader>());
         var priceCalculator = new PriceCalculator(Logging.CreateLogger<PriceCalculator>());
         var stockBuilder = new StockBuilder(Logging.CreateLogger<StockBuilder>());
         var registerReader = new RegisterDataReader(
@@ -80,7 +81,7 @@ public sealed class GetCatalogService : IGetCatalogService
             priceCalculator,
             stockBuilder,
             Logging.CreateLogger<RegisterDataReader>());
-        var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>(), registerReader, resolver);
+        var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>(), registerReader, resolver, refArrayFactory);
 
         var stopwatch = Stopwatch.StartNew();
         var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;

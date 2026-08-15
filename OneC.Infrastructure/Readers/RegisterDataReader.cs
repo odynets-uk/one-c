@@ -46,6 +46,27 @@ public sealed class RegisterDataReader : IRegisterDataReader
     }
 
     /// <inheritdoc />
+    public IReadOnlyCollection<string> LoadChangedItemGuids(
+        string? pricesChangedSince,
+        string? stockChangedSince)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (pricesChangedSince is not null)
+        {
+            result.UnionWith(_priceLoader.LoadChangedItemGuids(pricesChangedSince));
+        }
+
+        if (stockChangedSince is not null)
+        {
+            result.UnionWith(_lastMovementLoader.LoadChangedItemGuids(stockChangedSince));
+        }
+
+        _logger.LogInformation("Loaded {Count} changed item GUIDs (prices OR stock).", result.Count);
+        return result;
+    }
+
+    /// <inheritdoc />
     public RefCache BuildRefCache(IReadOnlyCollection<string> itemGuids, string catalogName)
     {
         return _refCacheBuilder.BuildRefCache(itemGuids, catalogName);

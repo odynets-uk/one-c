@@ -28,6 +28,7 @@ public static class DependencyInjection
         // Register readers and related services
         services.AddScoped<ReferenceResolver>();
         services.AddScoped<RefCacheBuilder>();
+        services.AddScoped<RefArrayFactory>();
         services.AddScoped<PriceTypeLoader>();
         services.AddScoped<PriceLoader>();
         services.AddScoped<StockLoader>();
