@@ -164,7 +164,7 @@ dotnet run --project OneC.Cli -- get-catalog categories --profile profiles/categ
 
 ```json
 {
-  "name": "products-all-45d",
+  "name": "products",
   "source": { "type": "CatalogObject.Номенклатура", "schema": "./data-enterprise.xsd" },
   "mode": "incremental",
   "batch_size": -1,
