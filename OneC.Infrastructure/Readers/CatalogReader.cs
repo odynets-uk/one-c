@@ -20,6 +20,7 @@ public sealed class CatalogReader
     private readonly ComValueMapper _mapper;
     private readonly ILogger<CatalogReader> _logger;
     private readonly IRegisterDataReader _registerReader;
+    private readonly ReferenceResolver _referenceResolver;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="CatalogReader" /> class.
@@ -28,12 +29,14 @@ public sealed class CatalogReader
     /// <param name="mapper">Value mapper.</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="registerReader">Register data reader.</param>
-    public CatalogReader(IComSession session, ComValueMapper mapper, ILogger<CatalogReader> logger, IRegisterDataReader registerReader)
+    /// <param name="referenceResolver">Reference resolver for cached GUID extraction.</param>
+    public CatalogReader(IComSession session, ComValueMapper mapper, ILogger<CatalogReader> logger, IRegisterDataReader registerReader, ReferenceResolver referenceResolver)
     {
         _session = session;
         _mapper = mapper;
         _logger = logger;
         _registerReader = registerReader;
+        _referenceResolver = referenceResolver;
     }
 
     /// <summary>
@@ -74,15 +77,17 @@ public sealed class CatalogReader
 
             _logger.LogInformation("Executing query: {QueryText}", (string)query.Text);
 
-            // 3. Execute and iterate (Latin methods) — collect all records and their GUIDs first.
+            // 3. Execute and unload to ValueTable for faster access.
             var iterSw = Stopwatch.StartNew();
             dynamic queryResult = query.Execute();
-            dynamic selection = queryResult.Choose();
+            dynamic table = queryResult.Unload();
 
-            var count = 0;
+            var rowCount = table.Count();
             var itemGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            while (selection.Next())
+
+            for (var i = 0; i < rowCount; i++)
             {
+                dynamic selection = table.Get(i);
                 var record = MapRecord(selection, profile, catalogName, categoryIdSet);
 
                 if (readPrices || readStock)
@@ -95,21 +100,20 @@ public sealed class CatalogReader
                 }
 
                 records.Add(record);
-                count++;
 
-                if (count % 1000 == 0)
+                if ((i + 1) % 1000 == 0)
                 {
-                    _logger.LogInformation("Iterated {Count} catalog records...", count);
+                    _logger.LogInformation("Iterated {Count} catalog records...", i + 1);
                 }
 
-                if (batchSize > 0 && count >= batchSize)
+                if (batchSize > 0 && (i + 1) >= batchSize)
                 {
                     _logger.LogInformation("Batch limit reached: {BatchSize} records.", batchSize);
                     break;
                 }
             }
             iterSw.Stop();
-            _logger.LogInformation("Stage catalog-iterate done: {Count} records in {ElapsedMs} ms.", count, iterSw.ElapsedMilliseconds);
+            _logger.LogInformation("Stage catalog-iterate done: {Count} records in {ElapsedMs} ms.", records.Count, iterSw.ElapsedMilliseconds);
 
             // 4b. Load price/stock data from registers. The registers are filtered
             //     by a 1C array of references (В (&ItemsArray)) for the collected
@@ -445,48 +449,9 @@ public sealed class CatalogReader
     /// </summary>
     private string? GetRefId(object refObject)
     {
-        var type = refObject.GetType();
-
-        // 1) Try УникальныйИдентификатор() (Cyrillic, works via InvokeMember).
-        try
-        {
-            var guid = type.InvokeMember(
-                "УникальныйИдентификатор",
-                BindingFlags.InvokeMethod,
-                null,
-                refObject,
-                null);
-            if (guid is not null)
-            {
-                return OneCRef.FromString(_session.String(guid))?.ToString();
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("УникальныйИдентификатор failed: {Message}", ex.Message);
-        }
-
-        // 2) Try Ref property (latin) — returns the Ref value.
-        try
-        {
-            var refValue = type.InvokeMember(
-                "Ref",
-                BindingFlags.GetProperty,
-                null,
-                refObject,
-                null);
-            if (refValue is not null && !refValue.GetType().IsCOMObject)
-            {
-                return OneCRef.FromString(_session.String(refValue))?.ToString();
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("Ref property failed: {Message}", ex.Message);
-        }
-
-        _logger.LogWarning("Failed to extract GUID from 1C reference object.");
-        return null;
+        // Use the injected ReferenceResolver for cached, high-performance GUID extraction.
+        // This replaces the slow static implementation that called УникальныйИдентификатор every time.
+        return _referenceResolver?.GetRefGuid(refObject);
     }
 
     private static object? ConvertToDbValue(object? value, ProfileColumn column)

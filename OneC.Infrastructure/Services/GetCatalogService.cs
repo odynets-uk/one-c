@@ -80,7 +80,7 @@ public sealed class GetCatalogService : IGetCatalogService
             priceCalculator,
             stockBuilder,
             Logging.CreateLogger<RegisterDataReader>());
-        var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>(), registerReader);
+        var reader = new CatalogReader(session, mapper, Logging.CreateLogger<CatalogReader>(), registerReader, resolver);
 
         var stopwatch = Stopwatch.StartNew();
         var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;

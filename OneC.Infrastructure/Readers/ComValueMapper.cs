@@ -112,19 +112,17 @@ public sealed class ComValueMapper
         {
             try
             {
-                // Built-in 1C function: Строка(Неопределено) -> "", Строка(NULL) -> "Null".
+                // Fast Path: Most empty 1C references/objects return empty string or "{}" via String()
                 var asString = _session.String(value);
-                if (string.IsNullOrEmpty(asString))
-                {
-                    return null; // Undefined / empty value.
-                }
-
-                // Also check the exact type name via ТипЗнч.
-                var typeName = _session.String(_session.Connection.ТипЗнч(value));
-                if (typeName is "Неопределено" or "Null")
+                if (string.IsNullOrEmpty(asString) || asString == "{}")
                 {
                     return null;
                 }
+
+                // Only if the string looks valid, we might need to check the exact type.
+                // But for most cases, if asString is not empty, the value is not Undefined/Null.
+                // We remove the expensive ТипЗнч call here and rely on the string representation
+                // and the fact that valid objects have a non-empty description or GUID.
             }
             catch (Exception ex)
             {
