@@ -32,32 +32,74 @@ public sealed class PriceLoader
     ///     for the requested items instead of the entire price register.
     ///     Batching avoids passing the full catalog in a single array (13k+ refs
     ///     made 1C take ~250s per pass).
+    ///     When <paramref name="changedSince" /> is provided, reads the physical register
+    ///     table with a period filter — only prices that changed within the period are
+    ///     returned (latest per item+type).
     /// </summary>
     public Dictionary<string, Dictionary<string, PriceRow>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
-        RefCache refCache)
+        RefCache refCache,
+        string? changedSince = null)
     {
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, Dictionary<string, PriceRow>>(StringComparer.OrdinalIgnoreCase);
+        var (sinceDate, toDate) = PeriodParser.Parse(changedSince);
 
         foreach (var batch in itemGuids.Chunk(RefBatchSize))
         {
             dynamic query = _session.Connection.NewObject("Query");
-            query.Text = """
-                         SELECT
-                             Цены.Номенклатура AS Item,
-                             Цены.ТипЦен AS PriceType,
-                             Цены.Цена AS Price,
-                             Цены.ПроцентСкидкиНаценки AS MarkupPct,
-                             Цены.ЕдиницаИзмерения AS Unit,
-                             Цены.Период AS Period
-                         FROM
-                             РегистрСведений.ЦеныНоменклатуры.СрезПоследних() AS Цены
-                         WHERE
-                             Цены.Номенклатура В (&ItemsArray)
-                         """;
 
-            query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+            // With changed_since: read the PHYSICAL register table and filter by period.
+            // The physical table has one row per change; ProcessPriceTable below keeps
+            // the latest record per (item, type) — i.e. the latest price within the window.
+            if (sinceDate is not null)
+            {
+                var text = """
+                           SELECT
+                               Цены.Номенклатура AS Item,
+                               Цены.ТипЦен AS PriceType,
+                               Цены.Цена AS Price,
+                               Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                               Цены.ЕдиницаИзмерения AS Unit,
+                               Цены.Период AS Period
+                           FROM
+                               РегистрСведений.ЦеныНоменклатуры AS Цены
+                           WHERE
+                               Цены.Номенклатура В (&ItemsArray)
+                               AND Цены.Период >= &SinceDate
+                           """;
+
+                if (toDate is not null)
+                {
+                    text = text.Replace("AND Цены.Период >= &SinceDate", "AND Цены.Период >= &SinceDate AND Цены.Период <= &ToDate");
+                }
+
+                query.Text = text;
+                query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+                query.SetParameter("SinceDate", sinceDate.Value);
+                if (toDate is not null)
+                {
+                    query.SetParameter("ToDate", toDate.Value);
+                }
+            }
+            else
+            {
+                query.Text = """
+                             SELECT
+                                 Цены.Номенклатура AS Item,
+                                 Цены.ТипЦен AS PriceType,
+                                 Цены.Цена AS Price,
+                                 Цены.ПроцентСкидкиНаценки AS MarkupPct,
+                                 Цены.ЕдиницаИзмерения AS Unit,
+                                 Цены.Период AS Period
+                             FROM
+                                 РегистрСведений.ЦеныНоменклатуры.СрезПоследних() AS Цены
+                             WHERE
+                                 Цены.Номенклатура В (&ItemsArray)
+                             """;
+
+                query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+            }
 
             dynamic table = query.Execute().Unload();
             ProcessPriceTable(table, refCache, result);

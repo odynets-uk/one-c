@@ -20,10 +20,13 @@ public interface IRegisterDataReader
 
     /// <summary>
     ///     Loads the latest price slice (СрезПоследних) for the given items.
+    ///     When <paramref name="changedSince" /> is provided, only prices that changed
+    ///     within the period are returned (latest per item+type).
     /// </summary>
     Dictionary<string, Dictionary<string, PriceRow>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
-        RefCache refCache);
+        RefCache refCache,
+        string? changedSince = null);
 
     /// <summary>
     ///     Loads current warehouse remainders (non-zero) for the given items.
@@ -34,10 +37,13 @@ public interface IRegisterDataReader
 
     /// <summary>
     ///     Loads the last movement date per item+warehouse for the given items.
+    ///     When <paramref name="changedSince" /> is provided, only movements within
+    ///     the period are considered.
     /// </summary>
     Dictionary<string, string> LoadLastMovements(
         IReadOnlyCollection<string> itemGuids,
-        RefCache refCache);
+        RefCache refCache,
+        string? changedSince = null);
 
     /// <summary>
     ///     Builds the prices list for a given item GUID.

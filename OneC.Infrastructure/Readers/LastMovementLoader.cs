@@ -30,32 +30,59 @@ public sealed class LastMovementLoader
     ///     Loads the last movement date per item+warehouse.
     ///     Filters by a 1C array of references (В (&ItemsArray)).
     ///     Returns a dictionary keyed by "itemGuid_warehouseGuid".
+    ///     When <paramref name="changedSince" /> is provided, only movements within
+    ///     the period are considered — items with no movement in the window are excluded.
     /// </summary>
     public Dictionary<string, string> LoadLastMovements(
         IReadOnlyCollection<string> itemGuids,
-        RefCache refCache)
+        RefCache refCache,
+        string? changedSince = null)
     {
         var sw = Stopwatch.StartNew();
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var (sinceDate, toDate) = PeriodParser.Parse(changedSince);
 
         foreach (var batch in itemGuids.Chunk(RefBatchSize))
         {
             dynamic query = _session.Connection.NewObject("Query");
-            query.Text = """
-                         SELECT
-                             Рух.Номенклатура AS Item,
-                             Рух.Склад AS Warehouse,
-                             MAX(Рух.Период) AS LastMovement
-                         FROM
-                             РегистрНакопления.ТоварыНаСкладах AS Рух
-                         WHERE
-                             Рух.Номенклатура В (&ItemsArray)
-                         GROUP BY
-                             Рух.Номенклатура,
-                             Рух.Склад
-                         """;
 
+            var text = """
+                       SELECT
+                           Рух.Номенклатура AS Item,
+                           Рух.Склад AS Warehouse,
+                           MAX(Рух.Период) AS LastMovement
+                       FROM
+                           РегистрНакопления.ТоварыНаСкладах AS Рух
+                       WHERE
+                           Рух.Номенклатура В (&ItemsArray)
+                       """;
+
+            if (sinceDate is not null)
+            {
+                text += "\n    AND Рух.Период >= &SinceDate";
+                if (toDate is not null)
+                {
+                    text += "\n    AND Рух.Период <= &ToDate";
+                }
+            }
+
+            text += """
+                    
+                    GROUP BY
+                        Рух.Номенклатура,
+                        Рух.Склад
+                    """;
+
+            query.Text = text;
             query.SetParameter("ItemsArray", CreateRefArray(batch, refCache));
+            if (sinceDate is not null)
+            {
+                query.SetParameter("SinceDate", sinceDate.Value);
+                if (toDate is not null)
+                {
+                    query.SetParameter("ToDate", toDate.Value);
+                }
+            }
 
             dynamic table = query.Execute().Unload();
             int rowCount = table.Count();

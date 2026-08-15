@@ -54,9 +54,10 @@ public sealed class RegisterDataReader : IRegisterDataReader
     /// <inheritdoc />
     public Dictionary<string, Dictionary<string, PriceRow>> LoadPrices(
         IReadOnlyCollection<string> itemGuids,
-        RefCache refCache)
+        RefCache refCache,
+        string? changedSince = null)
     {
-        return _priceLoader.LoadPrices(itemGuids, refCache);
+        return _priceLoader.LoadPrices(itemGuids, refCache, changedSince);
     }
 
     /// <inheritdoc />
@@ -70,9 +71,10 @@ public sealed class RegisterDataReader : IRegisterDataReader
     /// <inheritdoc />
     public Dictionary<string, string> LoadLastMovements(
         IReadOnlyCollection<string> itemGuids,
-        RefCache refCache)
+        RefCache refCache,
+        string? changedSince = null)
     {
-        return _lastMovementLoader.LoadLastMovements(itemGuids, refCache);
+        return _lastMovementLoader.LoadLastMovements(itemGuids, refCache, changedSince);
     }
 
     /// <inheritdoc />

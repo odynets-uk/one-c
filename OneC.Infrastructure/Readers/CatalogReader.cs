@@ -141,7 +141,7 @@ public sealed class CatalogReader
                 _logger.LogInformation("Stage price-types done in {ElapsedMs} ms.", priceTypesSw.ElapsedMilliseconds);
 
                 var pricesSw = Stopwatch.StartNew();
-                pricesByItem = _registerReader.LoadPrices(itemGuids, refCache);
+                pricesByItem = _registerReader.LoadPrices(itemGuids, refCache, profile.Filters?.Prices?.ChangedSince);
                 pricesSw.Stop();
                 _logger.LogInformation("Stage prices done in {ElapsedMs} ms.", pricesSw.ElapsedMilliseconds);
             }
@@ -154,20 +154,27 @@ public sealed class CatalogReader
                 _logger.LogInformation("Stage stock done in {ElapsedMs} ms.", stockSw.ElapsedMilliseconds);
 
                 var lastMovSw = Stopwatch.StartNew();
-                lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache);
+                lastMovements = _registerReader.LoadLastMovements(itemGuids, refCache, profile.Filters?.Stock?.ChangedSince);
                 lastMovSw.Stop();
                 _logger.LogInformation("Stage last-movements done in {ElapsedMs} ms.", lastMovSw.ElapsedMilliseconds);
             }
             }
 
             // 5. Attach prices/stock to the records (if requested).
+            //    Independent filtering: when changed_since is set for prices and/or stock,
+            //    an item is kept if it satisfies AT LEAST ONE of the active filters (OR),
+            //    so a price change keeps the item even if stock didn't move, and vice versa.
             if (readPrices || readStock)
             {
+                var pricesChangedSince = profile.Filters?.Prices?.ChangedSince is not null;
+                var stockChangedSince = profile.Filters?.Stock?.ChangedSince is not null;
+
                 var filtered = new List<Dictionary<string, object?>>(records.Count);
                 foreach (var record in records)
                 {
                     var itemGuid = record.TryGetValue("id", out object? idVal) ? idVal?.ToString() : null;
-                    var keep = true;
+                    var hasPrices = false;
+                    var hasStock = false;
 
                     if (itemGuid is not null)
                     {
@@ -175,24 +182,52 @@ public sealed class CatalogReader
                         {
                             var prices = _registerReader.BuildPrices(itemGuid, priceTypesByGuid, pricesByItem);
                             record["prices"] = prices.Count > 0 ? prices : null;
-
-                            // skip_items_without_prices: drop the item if it has no prices.
-                            if (profile.SkipItemsWithoutPrices && prices.Count == 0)
-                            {
-                                keep = false;
-                            }
+                            hasPrices = prices.Count > 0;
                         }
 
                         if (readStock && stockByItem is not null && lastMovements is not null)
                         {
                             var stock = _registerReader.BuildStock(itemGuid, stockByItem, lastMovements);
-                            record["stock"] = stock.Count > 0 ? stock : null;
 
-                            // skip_items_without_stock: drop the item if it has no stock.
-                            if (profile.SkipItemsWithoutStock && stock.Count == 0)
+                            // When changed_since is set for stock, keep only warehouses
+                            // that had movement within the period (LoadLastMovements already
+                            // filtered by period, so empty LastMovement = no movement in window).
+                            if (stockChangedSince)
                             {
-                                keep = false;
+                                stock = stock.Where(s => !string.IsNullOrEmpty(s.LastMovement)).ToList();
                             }
+
+                            record["stock"] = stock.Count > 0 ? stock : null;
+                            hasStock = stock.Count > 0;
+                        }
+                    }
+
+                    // Determine whether to keep the item.
+                    var keep = true;
+                    if (pricesChangedSince && stockChangedSince)
+                    {
+                        // OR: keep if prices changed OR stock changed.
+                        keep = hasPrices || hasStock;
+                    }
+                    else if (pricesChangedSince)
+                    {
+                        keep = hasPrices;
+                    }
+                    else if (stockChangedSince)
+                    {
+                        keep = hasStock;
+                    }
+                    else
+                    {
+                        // Legacy skip flags (no changed_since).
+                        if (profile.SkipItemsWithoutPrices && readPrices && !hasPrices)
+                        {
+                            keep = false;
+                        }
+
+                        if (profile.SkipItemsWithoutStock && readStock && !hasStock)
+                        {
+                            keep = false;
                         }
                     }
 
